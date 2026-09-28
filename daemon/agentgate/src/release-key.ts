@@ -5,11 +5,8 @@
  * (fail closed). The private half lives ONLY in the GitHub Actions secret
  * AGENTGATE_RELEASE_SIGNING_KEY; see docs/releasing.md.
  *
- * TODO(before the first public release): replace DEV_PLACEHOLDER_RELEASE_PUBLIC_KEY below
- * with the output of `node scripts/gen-release-key.mjs` (public key line). The placeholder's
- * private seed was discarded when it was generated, so NOTHING can be signed for it: until
- * it is replaced, `agentgate update` fails closed and `npm run build:release --
- * --require-release-key` (used by the release workflow) refuses to build.
+ * DEV_PLACEHOLDER_RELEASE_PUBLIC_KEY is kept only so tests and dev builds can recognize an
+ * unsigned setup: its private seed was discarded, so nothing can ever be signed for it.
  *
  * A build may override the key without editing this file:
  *   AGENTGATE_RELEASE_PUBLIC_KEY=<base64url> npm run build:release
@@ -18,8 +15,11 @@
  */
 export const DEV_PLACEHOLDER_RELEASE_PUBLIC_KEY = "slciBkWzOpQWspWOUiCTJZMj8mjj9PJ1gcdy4valAGw";
 
-/** The key embedded in the source tree (read by scripts/build-release.mjs). */
-export const SOURCE_RELEASE_PUBLIC_KEY = DEV_PLACEHOLDER_RELEASE_PUBLIC_KEY;
+/**
+ * The official AgentGate release key (generated 2026-09-28), embedded in the source tree and
+ * read by scripts/build-release.mjs. Rotating it needs a release signed by the old key first.
+ */
+export const SOURCE_RELEASE_PUBLIC_KEY = "H89mNqez-uuAI37mD4u5UQWXRi7ew7rcTcu6FWBvVQo";
 
 declare const __AGENTGATE_RELEASE_PUBKEY__: string | undefined;
 
