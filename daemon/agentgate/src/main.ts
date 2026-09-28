@@ -12,6 +12,7 @@ import { hookCommand } from "./commands/hook.ts";
 import { cursorHookCommand } from "./commands/hook-cursor.ts";
 import { installCursorCommand, uninstallCursorCommand } from "./commands/install-cursor.ts";
 import { installCodexCommand, uninstallCodexCommand } from "./commands/install-codex.ts";
+import { parseConnectMode } from "./commands/connect-agents.ts";
 import { providerHookCommand } from "./commands/hook-provider.ts";
 import { installCommand, uninstallCommand } from "./commands/install.ts";
 import { devicesCommand } from "./commands/devices.ts";
@@ -35,7 +36,8 @@ Usage:
   agentgate limits show [--session ID]
   agentgate usage [--range today|7d|30d]
   agentgate devices list | revoke <id> | reset        (local recovery; asks for sudo — human only)
-  agentgate setup   [--port 8787] [--host 0.0.0.0] [--no-start] [--no-pair]   local server + login + pairing QR
+  agentgate setup   [--port 8787] [--host 0.0.0.0] [--no-start] [--no-pair] [--connect ask|all|none]
+                                                  local server + login + gate your agents + pairing QR
   agentgate serve   [--port N] [--host H]         run the local server in the foreground
   agentgate server  <start|stop|status|logs [-f]>
   agentgate restart                                 restart the local server (launchd)
@@ -155,11 +157,13 @@ export async function main(argv: string[]): Promise<number> {
         return await workspaceCommand(action, args, { ...(str(v.label) ? { label: str(v.label)! } : {}) });
       }
       case "setup": {
-        const v = parse(rest, { port: { type: "string" }, host: { type: "string" }, "no-start": { type: "boolean" }, "no-pair": { type: "boolean" } });
+        const v = parse(rest, { port: { type: "string" }, host: { type: "string" }, "no-start": { type: "boolean" }, "no-pair": { type: "boolean" }, connect: { type: "string" } });
         if (v === null) return EXIT.OK;
         const port = v.port === undefined ? undefined : Number(v.port);
         if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new UsageError("--port must be 1-65535");
-        return await setupCommand({ ...(port ? { port } : {}), ...(str(v.host) ? { host: str(v.host)! } : {}), start: v["no-start"] !== true, pair: v["no-pair"] !== true });
+        const connect = parseConnectMode(str(v.connect) ?? process.env.AGENTGATE_CONNECT);
+        if (connect === null) throw new UsageError("--connect must be ask, all or none");
+        return await setupCommand({ ...(port ? { port } : {}), ...(str(v.host) ? { host: str(v.host)! } : {}), start: v["no-start"] !== true, pair: v["no-pair"] !== true, connect });
       }
       case "serve": {
         const v = parse(rest, { port: { type: "string" }, host: { type: "string" } });

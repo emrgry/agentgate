@@ -1,7 +1,7 @@
 {
   "name": "agentgate",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The human authorization layer between AI agents and the real world.",
   "type": "module",
   "workspaces": [

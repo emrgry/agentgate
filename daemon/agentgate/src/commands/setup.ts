@@ -12,6 +12,7 @@ import { loginCommand } from "./login.ts";
 import { buildInstalledHookCommand, ourGroups } from "../claude-settings.ts";
 import { hookShimPath } from "./run.ts";
 import { pairCommand } from "./pair.ts";
+import { connectAgentsStep, type ConnectMode } from "./connect-agents.ts";
 import { layout } from "../install-layout.ts";
 
 /**
@@ -142,6 +143,8 @@ export interface SetupOptions {
   host?: string;
   start: boolean;
   pair: boolean;
+  /** Offer to gate the agents found on this Mac (default ask; never asks without a terminal). */
+  connect?: ConnectMode;
 }
 
 export async function setupCommand(o: SetupOptions): Promise<number> {
@@ -209,7 +212,14 @@ export async function setupCommand(o: SetupOptions): Promise<number> {
     await updateConfig((c0) => ({ ...c0, require_device_signatures: true }));
   }
 
-  // 5. Pairing QR (v2).
+  // 5. Gate the agents on this Mac (Claude Code, Codex, Cursor). Before the QR so the QR stays
+  // on screen; a failure is reported but never hides the pairing QR.
+  if (o.connect !== undefined) {
+    out("");
+    await connectAgentsStep(o.connect);
+  }
+
+  // 6. Pairing QR (v2).
   if (!o.pair) return EXIT.OK;
   out("");
   return pairCommand({ qr: true });

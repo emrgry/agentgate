@@ -45,8 +45,10 @@ curl -fsSL https://github.com/emrgry/agentgate/releases/latest/download/install.
 
 The installer downloads the release for your Mac, verifies its SHA-256 checksum (and the
 release signature when OpenSSL 3 is installed), installs it, and runs `agentgate setup`,
-which starts the local server and prints a QR code. Scan it with the AgentGate app to pair
-your phone. Then gate your agents:
+which starts the local server, offers to connect the agents it finds (Claude Code, Codex,
+Cursor) and prints a QR code. Scan it with the AgentGate app to pair your phone. That's it.
+
+To connect agents later, or non-interactively (`agentgate setup --connect all|none`):
 
 ```bash
 agentgate install claude-code            # this project (or --user --yes for every session)
