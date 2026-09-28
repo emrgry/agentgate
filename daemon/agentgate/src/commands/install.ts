@@ -35,6 +35,7 @@ import { EXIT } from "../exit-codes.ts";
 import { c, log, out } from "../output.ts";
 import { requireLogin } from "../runtime.ts";
 import { hookShimPath } from "./run.ts";
+import { layout } from "../install-layout.ts";
 
 /**
  * `agentgate install claude-code [--project <dir> | --user] [--env E] [--ttl N] [--yes]`
@@ -77,6 +78,11 @@ function readInstalls(): Record<string, InstallRecord> {
     return {};
   }
 }
+/** Claude Code settings files AgentGate has installed hooks into (for `agentgate uninstall`). */
+export function claudeInstalls(): Array<{ scope: Scope; file: string }> {
+  return Object.values(readInstalls()).map((r) => ({ scope: r.scope, file: r.file }));
+}
+
 function writeInstalls(v: Record<string, InstallRecord>) {
   mkdirSync(agentgateHome(), { recursive: true, mode: 0o700 });
   atomicWrite(paths.installs(), `${JSON.stringify(v, null, 2)}\n`, 0o600);
@@ -208,7 +214,7 @@ export async function installCommand(o: InstallOptions): Promise<number> {
     return EXIT.ERROR;
   }
   const shim = hookShimPath();
-  const node = process.execPath;
+  const node = layout().node;
   for (const [what, p] of [
     ["hook shim", shim],
     ["node", node],

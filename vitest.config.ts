@@ -13,6 +13,16 @@ export default defineConfig({
       "adapters/codex/vitest.config.ts",
       "adapters/generic/vitest.config.ts",
       {
+        // Opt-in (AGENTGATE_RELEASE_E2E=1, macOS): builds + installs real release tarballs.
+        test: {
+          name: "release-e2e",
+          include: ["scripts/test/**/*.test.ts"],
+          environment: "node",
+          testTimeout: 300_000,
+          hookTimeout: 600_000,
+        },
+      },
+      {
         test: {
           name: "packages",
           include: ["packages/**/test/**/*.test.ts"],

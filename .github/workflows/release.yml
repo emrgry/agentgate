@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: build, sign and publish
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # create the GitHub release; nothing else
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: .cache/node
+          key: node-dist-${{ hashFiles('scripts/build-release.mjs') }}
+      - run: npm ci
+
+      - name: Tag must match package.json version
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "tag $GITHUB_REF_NAME does not match package.json version $v"; exit 1; }
+
+      - name: Build all targets (fails if the release key is still the dev placeholder)
+        run: node scripts/build-release.mjs --all --require-release-key --out dist/release
+
+      - name: Sign SHA256SUMS
+        env:
+          AGENTGATE_RELEASE_SIGNING_KEY: ${{ secrets.AGENTGATE_RELEASE_SIGNING_KEY }}
+        run: node --import tsx scripts/sign-release.mjs dist/release
+
+      - name: Smoke-test the linux-x64 artifact
+        run: |
+          set -eu
+          root="$(mktemp -d)"
+          tar -xzf dist/release/agentgate-*-linux-x64.tar.gz -C "$root"
+          env -i HOME="$root" PATH=/usr/bin:/bin "$root/bin/agentgate" version
+          (cd dist/release && sha256sum -c SHA256SUMS)
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "AgentGate $GITHUB_REF_NAME" \
+            --notes "Install or update on macOS: \`curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | sh\` (or \`agentgate update\`). Verify: SHA256SUMS is signed (SHA256SUMS.sig, Ed25519) with the key pinned in the CLI." \
+            dist/release/agentgate-*.tar.gz \
+            dist/release/SHA256SUMS \
+            dist/release/SHA256SUMS.sig \
+            dist/release/install.sh

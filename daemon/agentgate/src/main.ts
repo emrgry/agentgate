@@ -2,7 +2,10 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import { loginCommand } from "./commands/login.ts";
 import { pairCommand } from "./commands/pair.ts";
 import { limitsCommand, sessionCommand, taskCommand, usageCommand, workspaceCommand } from "./commands/session.ts";
-import { serveCommand, serverCommand, setupCommand, uninstallServerCommand } from "./commands/setup.ts";
+import { restartCommand, serveCommand, serverCommand, setupCommand, uninstallServerCommand } from "./commands/setup.ts";
+import { updateCommand } from "./commands/update.ts";
+import { uninstallAllCommand } from "./commands/uninstall-all.ts";
+import { versionCommand } from "./commands/version.ts";
 import { mcpInstall, mcpStatus, mcpUninstall, mcpWrap } from "./commands/mcp.ts";
 import { execCommand } from "./commands/exec.ts";
 import { hookCommand } from "./commands/hook.ts";
@@ -32,7 +35,12 @@ Usage:
   agentgate setup   [--port 8787] [--host 0.0.0.0] [--no-start] [--no-pair]   local server + login + pairing QR
   agentgate serve   [--port N] [--host H]         run the local server in the foreground
   agentgate server  <start|stop|status|logs [-f]>
+  agentgate restart                                 restart the local server (launchd)
   agentgate uninstall-server [--purge]
+  agentgate version                                 version, install type (release/dev checkout) and path
+  agentgate update  [--check] [--version X]         install the latest signed release (keeps the previous one)
+  agentgate update  --rollback | --restart | --prune
+  agentgate uninstall [--purge] [--yes] [--dry-run] remove hooks, MCP wraps, launchd agent and installed files
   agentgate login   [--server URL] [--email EMAIL] [--accept-new-key] [--insecure-lan]
   agentgate pair    [--no-qr] [--advertise-url URL]                  one-time code to pair the AgentGate app (5 min)
   agentgate status
@@ -155,6 +163,19 @@ export async function main(argv: string[]): Promise<number> {
         if (v === null) return EXIT.OK;
         return await serverCommand(v._positionals[0], { follow: v.follow === true });
       }
+      case "restart":
+        if (parse(rest, {}) === null) return EXIT.OK;
+        return await restartCommand();
+      case "version":
+        if (parse(rest, {}) === null) return EXIT.OK;
+        return versionCommand();
+      case "update": {
+        const v = parse(rest, { check: { type: "boolean" }, version: { type: "string" }, rollback: { type: "boolean" }, restart: { type: "boolean" }, prune: { type: "boolean" } });
+        if (v === null) return EXIT.OK;
+        const modes = [v.check, v.rollback, v.restart, v.prune].filter((x) => x === true).length;
+        if (modes > 1 || ((v.rollback || v.restart || v.prune) && v.version !== undefined)) throw new UsageError("choose one of --check, --rollback, --restart, --prune (--version only with a plain update or --check)");
+        return await updateCommand({ check: v.check === true, version: str(v.version), rollback: v.rollback === true, restart: v.restart === true, prune: v.prune === true });
+      }
       case "uninstall-server": {
         const v = parse(rest, { purge: { type: "boolean" } });
         if (v === null) return EXIT.OK;
@@ -204,8 +225,13 @@ export async function main(argv: string[]): Promise<number> {
         });
       }
       case "uninstall": {
-        const v = parse(rest, { project: { type: "string" }, user: { type: "boolean" } }, true);
+        const v = parse(rest, { project: { type: "string" }, user: { type: "boolean" }, purge: { type: "boolean" }, yes: { type: "boolean" }, "dry-run": { type: "boolean" } }, true);
         if (v === null) return EXIT.OK;
+        if (v._positionals.length === 0) {
+          if (v.project !== undefined || v.user) throw new UsageError("--project/--user need an integration: agentgate uninstall claude-code …");
+          return await uninstallAllCommand({ purge: v.purge === true, yes: v.yes === true, dryRun: v["dry-run"] === true });
+        }
+        if (v.purge || v.yes || v["dry-run"]) throw new UsageError("--purge/--yes/--dry-run apply to a full `agentgate uninstall` (no integration name)");
         return uninstallCommand({ agent: v._positionals[0], project: str(v.project), user: v.user === true });
       }
       case "mcp": {

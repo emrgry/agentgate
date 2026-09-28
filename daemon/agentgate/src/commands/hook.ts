@@ -1,7 +1,6 @@
 import { appendFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { ActionDraft } from "@agentgate/protocol";
 import { ClaudeCodeAdapter, PreToolUseInput, type PreToolUseOutput } from "@agentgate/adapter-claude-code";
 import { z } from "zod";
@@ -21,6 +20,7 @@ import { blockInfo, reportBlocked, requireLogin, SignalScope } from "../runtime.
 import { gateExecution } from "../verify.ts";
 import { gateContext } from "../device-keys.ts";
 import { bindExecContext, computeExecContext, gitHooksSetting } from "../exec-context.ts";
+import { layout } from "../install-layout.ts";
 
 /**
  * `agentgate hook claude-code` — Claude Code hook entry (PreToolUse + SessionEnd,
@@ -54,24 +54,18 @@ const MAX_STDIN_BYTES = 8 * 1024 * 1024;
 
 /** Absolute path of the POSIX runner used in rewritten Bash commands. */
 export function execShimPath(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", "agentgate.sh");
+  return layout().cli;
 }
 
 /** AgentGate's own code + data the agent must not touch (see adapter guard). */
 export function protectedDirs(): string[] {
-  const repo = resolve(dirname(execShimPath()), "..", "..", "..");
   const secrets =
     process.platform === "darwin"
       ? join(homedir(), "Library", "Application Support", "agentgate-api")
       : join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "agentgate-api");
-  return [
-    join(repo, "daemon", "agentgate"),
-    join(repo, "adapters", "claude-code"),
-    join(repo, "packages"),
-    join(repo, "node_modules"),
-    join(repo, "apps", "api", ".data"),
-    process.env.AGENTGATE_API_SECRETS_DIR || secrets,
-  ];
+  // Dev checkout: the repo's AgentGate code; installed release: versions/, current, the
+  // running version and the PATH shim (see install-layout.ts).
+  return [...layout().protectedDirs, process.env.AGENTGATE_API_SECRETS_DIR || secrets];
 }
 
 export function hookTimeoutSeconds(): number {

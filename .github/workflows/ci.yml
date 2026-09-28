@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call: # reused by release.yml before anything is built or published
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: typecheck + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run
+      - run: npm test -w @agentgate/api
+
+  release-smoke:
+    name: release bundle smoke (linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: .cache/node
+          key: node-dist-${{ hashFiles('scripts/build-release.mjs') }}
+      - run: npm ci
+      - name: Build a linux-x64 release tarball (bundles + embedded Node.js)
+        run: node scripts/build-release.mjs --targets linux-x64 --out dist/smoke
+      - name: Run the bundled CLI and server with a minimal environment
+        run: |
+          set -eu
+          root="$(mktemp -d)"
+          tar -xzf dist/smoke/agentgate-*-linux-x64.tar.gz -C "$root"
+          export HOME="$root/home" AGENTGATE_HOME="$root/home/.agentgate"
+          mkdir -p "$HOME"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin NODE_OPTIONS=--require=/nonexistent "$root/bin/agentgate" version
+          env -i HOME="$HOME" PATH=/usr/bin:/bin "$root/bin/agentgate" --help > /dev/null
+          # The hook shim must fail closed (exit 2) on garbage input.
+          set +e; echo 'not json' | env -i HOME="$HOME" PATH=/usr/bin:/bin "$root/bin/agentgate-hook.sh"; rc=$?; set -e
+          [ "$rc" = 2 ] || { echo "hook shim exited $rc, expected 2"; exit 1; }
+          # The bundled API server (PGlite wasm) must start and answer.
+          env -i HOME="$HOME" AGENTGATE_HOME="$AGENTGATE_HOME" PATH=/usr/bin:/bin "$root/bin/agentgate" setup --no-start --port 18787 --host 127.0.0.1
+          env -i HOME="$HOME" AGENTGATE_HOME="$AGENTGATE_HOME" PATH=/usr/bin:/bin "$root/bin/agentgate" serve > "$root/serve.log" 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:18787/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:18787/healthz
+          kill %1

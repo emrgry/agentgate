@@ -15,10 +15,14 @@
     "test": "vitest run",
     "dev:api": "npm run dev -w @agentgate/api",
     "demo:slice": "bash scripts/demo-slice.sh",
-    "agentgate": "node daemon/agentgate/bin/agentgate.mjs"
+    "agentgate": "node daemon/agentgate/bin/agentgate.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "sign:release": "node --import tsx scripts/sign-release.mjs",
+    "test:release-e2e": "AGENTGATE_RELEASE_E2E=1 vitest run --project release-e2e"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants as fsc, mkdtempSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { hostname, tmpdir, constants as osc } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { delimiter, join } from "node:path";
 import { ourGroups } from "../claude-settings.ts";
 import { shellQuote } from "../action.ts";
 import { pruneApprovals } from "../approval-store.ts";
@@ -14,12 +13,14 @@ import { c, log } from "../output.ts";
 import { loadEffectivePolicy } from "../policy.ts";
 import { requireLogin } from "../runtime.ts";
 import { findInstalled } from "./install.ts";
+import { layout } from "../install-layout.ts";
 
 /** Claude hook timeout (seconds). The hook's own deadline is this minus 30 s. */
 export const HOOK_TIMEOUT_S = 600;
 
+/** Fail-closed hook shim; the stable ~/.agentgate/current/… path for installed releases. */
 export function hookShimPath(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", "agentgate-hook.sh");
+  return layout().hookShim;
 }
 
 export interface RunOptions {
@@ -87,7 +88,7 @@ export async function runAgentCommand(o: RunOptions): Promise<number> {
   const hookEnv: Record<string, string> = {
     AGENTGATE_SESSION_ID: sessionId,
     AGENTGATE_HOME: home,
-    AGENTGATE_NODE: process.execPath,
+    AGENTGATE_NODE: layout().node,
     AGENTGATE_HOOK_TIMEOUT_S: String(HOOK_TIMEOUT_S),
     ...(o.env ? { AGENTGATE_ENV: o.env } : {}),
     ...(o.ttl ? { AGENTGATE_TTL: String(o.ttl) } : {}),

@@ -37,8 +37,62 @@ Design documents: [architecture](docs/architecture.md), [local-first trust model
 
 ## Install
 
-A one-line installer and Homebrew formula are coming soon. For now, build from source
-(Node.js ≥ 22, macOS):
+macOS (Apple silicon or Intel). One line, no sudo, no Node.js/npm/git needed:
+
+```bash
+curl -fsSL https://github.com/emrgry/agentgate/releases/latest/download/install.sh | sh
+```
+
+The installer downloads the release for your Mac, verifies its SHA-256 checksum (and the
+release signature when OpenSSL 3 is installed), installs it, and runs `agentgate setup`,
+which starts the local server and prints a QR code. Scan it with the AgentGate app to pair
+your phone. Then gate your agents:
+
+```bash
+agentgate install claude-code            # this project (or --user --yes for every session)
+agentgate mcp install --client cursor --all
+```
+
+Options: `sh install.sh --dry-run` shows what it would do, `--no-setup` installs only,
+`AGENTGATE_VERSION=0.2.0` pins a version. If `~/.local/bin` is not on your `PATH`, the
+installer prints the line to add to `~/.zprofile`.
+
+**Update**, **roll back**, **uninstall**:
+
+```bash
+agentgate update              # latest signed release; restarts the server only when no agent session runs
+agentgate update --check      # just tell me
+agentgate update --rollback   # back to the previous version (kept on disk)
+agentgate version             # version, install type and path
+agentgate uninstall           # removes hooks, MCP wraps, the launchd agent and the program files
+agentgate uninstall --purge   # …and also your pairing, config and server data
+```
+
+`agentgate update` only installs releases whose `SHA256SUMS` carries a valid Ed25519
+signature by the release key built into the CLI; anything else is refused. The first
+install trusts GitHub's TLS (plus the checksum, and the signature if OpenSSL 3 is present).
+
+**What goes where** (all inside your home directory):
+
+| Path | What |
+|---|---|
+| `~/.agentgate/versions/<version>/` | the program: `bin/agentgate`, `bin/agentgate-hook.sh`, `libexec/node` (bundled Node.js), `lib/` |
+| `~/.agentgate/current` | symlink to the active version; hooks, MCP wraps and launchd reference this path, so updates never break them |
+| `~/.agentgate/previous` | the version `update --rollback` returns to (at most 2 old versions are kept) |
+| `~/.local/bin/agentgate` | small shim that runs `~/.agentgate/current/bin/agentgate` |
+| `~/.agentgate/config.json`, `~/.agentgate/server/` | your pairing, tokens, local server data (PGlite) and identity key; kept by `uninstall` unless `--purge` |
+| `~/Library/LaunchAgents/dev.agentgate.server.plist` | the launchd agent that keeps the local server running |
+
+Agents cannot run `agentgate update`, `uninstall`, `setup` or `restart`, and cannot modify
+`~/.agentgate` (the hook guard blocks it).
+
+Linux: release tarballs are published for `linux-x64` and `linux-arm64`, but the installer
+and `agentgate setup` (launchd) are macOS-only for now; run `agentgate serve` under your own
+service manager, or build from source.
+
+### From source
+
+Node.js ≥ 22:
 
 ```bash
 git clone https://github.com/emrgry/agentgate && cd agentgate
@@ -47,14 +101,14 @@ npm ci
 ./daemon/agentgate/bin/agentgate.sh install claude-code
 ```
 
-Scan the QR code with the AgentGate app to pair your phone.
-
 ## Development
 
 ```bash
 npm run typecheck
 npx vitest run                 # all workspaces
 npm test -w @agentgate/api     # API integration tests
+npm run build:release          # dist/release: self-contained tarballs (see docs/releasing.md)
+npm run test:release-e2e       # macOS: build, install into a temp HOME, update, uninstall
 ```
 
 | Path | What |

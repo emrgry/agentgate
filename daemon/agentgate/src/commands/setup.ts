@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { updateConfig } from "../auth-session.ts";
 import { agentgateHome } from "../config.ts";
@@ -12,6 +12,7 @@ import { loginCommand } from "./login.ts";
 import { buildInstalledHookCommand, ourGroups } from "../claude-settings.ts";
 import { hookShimPath } from "./run.ts";
 import { pairCommand } from "./pair.ts";
+import { layout } from "../install-layout.ts";
 
 /**
  * M7 local-first: `agentgate setup` installs and starts the local AgentGate server
@@ -20,12 +21,13 @@ import { pairCommand } from "./pair.ts";
  *
  * launchctl is behind an injectable runner (AGENTGATE_LAUNCHCTL) so tests never touch
  * the real launchd.
+ *
+ * Paths come from install-layout.ts: a dev checkout runs `node …/bin/agentgate.mjs serve`;
+ * an installed release runs the stable `~/.agentgate/current/bin/agentgate serve`, so an
+ * update only has to flip `current` and restart the agent.
  */
 
 export const LABEL = "dev.agentgate.server";
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
-const API_MAIN = join(REPO, "apps", "api", "src", "main.ts");
-const CLI_ENTRY = join(REPO, "daemon", "agentgate", "bin", "agentgate.mjs");
 
 export const serverDir = () => join(agentgateHome(), "server");
 const serverJsonPath = () => join(serverDir(), "server.json");
@@ -34,7 +36,7 @@ export const plistPath = () => join(homedir(), "Library", "LaunchAgents", `${LAB
 
 /** PreToolUse (gating) + PostToolUse (reporting) for supervisor-run turns. */
 export function managedHookSettings() {
-  const command = buildInstalledHookCommand({ shimPath: hookShimPath(), nodePath: process.execPath, home: agentgateHome() });
+  const command = buildInstalledHookCommand({ shimPath: hookShimPath(), nodePath: layout().node, home: agentgateHome() });
   const g = ourGroups(command);
   return { hooks: { PreToolUse: [g.PreToolUse], PostToolUse: [g.PostToolUse] } };
 }
@@ -72,17 +74,17 @@ function ownerFullName(): string {
   return process.env.USER || userInfo().username || "Owner";
 }
 
-function isLaunchdPlatform(): boolean {
+export function isLaunchdPlatform(): boolean {
   return (process.env.AGENTGATE_SETUP_PLATFORM ?? process.platform) === "darwin";
 }
 
-function launchctl(args: string[]): { status: number; out: string } {
+export function launchctl(args: string[]): { status: number; out: string } {
   const bin = process.env.AGENTGATE_LAUNCHCTL || "/bin/launchctl";
   const r = spawnSync(bin, args, { encoding: "utf8", timeout: 20_000 });
   return { status: r.status ?? 1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
-const domain = () => `gui/${process.getuid?.() ?? 501}`;
-const loaded = () => launchctl(["print", `${domain()}/${LABEL}`]).status === 0;
+export const domain = () => `gui/${process.getuid?.() ?? 501}`;
+export const loaded = () => launchctl(["print", `${domain()}/${LABEL}`]).status === 0;
 
 function xml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -91,9 +93,9 @@ function xml(s: string) {
 export function renderPlist(): string {
   const env: Record<string, string> = {
     AGENTGATE_HOME: agentgateHome(),
-    PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: `${dirname(layout().node)}:/usr/bin:/bin:/usr/sbin:/sbin`,
   };
-  const args = [process.execPath, CLI_ENTRY, "serve"];
+  const args = layout().serveArgs;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -121,7 +123,7 @@ ${Object.entries(env)
 }
 
 // First start compiles TypeScript (tsx) and initialises PGlite; allow a slow machine.
-async function waitHealthy(port: number, ms = 90_000): Promise<boolean> {
+export async function waitHealthy(port: number, ms = 90_000): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     try {
@@ -167,7 +169,7 @@ export async function setupCommand(o: SetupOptions): Promise<number> {
   // 3. Background service.
   if (!isLaunchdPlatform()) {
     log.warn("automatic background start is only implemented for macOS (launchd).");
-    log.step(`Run the server yourself (e.g. in a systemd user service or tmux): ${c.bold(`${process.execPath} ${CLI_ENTRY} serve`)}`);
+    log.step(`Run the server yourself (e.g. in a systemd user service or tmux): ${c.bold(layout().serveArgs.join(" "))}`);
   } else {
     const plist = renderPlist();
     const path = plistPath();
@@ -238,7 +240,7 @@ export async function serveCommand(o: { port?: number; host?: string }): Promise
   if (cfg.turn_path) env.AGENTGATE_TURN_PATH = cfg.turn_path;
   for (const [k, v] of Object.entries(env)) process.env[k] ??= v;
   // The API owns its process from here (listen, signals, shutdown → process.exit).
-  await import(API_MAIN);
+  await import(pathToFileURL(layout().apiMain).href);
   return new Promise<number>(() => {});
 }
 
@@ -282,6 +284,42 @@ export async function serverCommand(action: string | undefined, o: { follow: boo
       log.fail("usage: agentgate server <start|stop|status|logs [-f]>");
       return EXIT.USAGE;
   }
+}
+
+/**
+ * `agentgate restart`: (re)write the launchd plist for THIS installation and restart the
+ * server. Used after `agentgate update` (run by the new version so its plist is current).
+ */
+export async function restartCommand(): Promise<number> {
+  if (!isLaunchdPlatform()) {
+    log.fail("restart is only implemented for macOS (launchd); restart `agentgate serve` yourself");
+    return EXIT.ERROR;
+  }
+  const path = plistPath();
+  if (!existsSync(path)) {
+    log.fail("the local server is not installed — run `agentgate setup`");
+    return EXIT.ERROR;
+  }
+  const plist = renderPlist();
+  const changed = readFileSync(path, "utf8") !== plist;
+  if (changed) writeFileSync(path, plist, { mode: 0o644 });
+  let r;
+  if (loaded() && !changed) r = launchctl(["kickstart", "-k", `${domain()}/${LABEL}`]);
+  else {
+    if (loaded()) launchctl(["bootout", `${domain()}/${LABEL}`]);
+    r = launchctl(["bootstrap", domain(), path]);
+  }
+  if (r.status !== 0) {
+    log.fail(`launchctl failed: ${r.out.trim()}`);
+    return EXIT.ERROR;
+  }
+  const cfg = readServerConfig();
+  if (cfg && !(await waitHealthy(cfg.port, 60_000))) {
+    log.fail(`server did not become healthy — see ${logPath()} (agentgate server logs)`);
+    return EXIT.ERROR;
+  }
+  log.ok(`server restarted${changed ? " (launchd agent updated)" : ""}`);
+  return EXIT.OK;
 }
 
 export function uninstallServerCommand(o: { purge: boolean }): number {

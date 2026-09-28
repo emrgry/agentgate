@@ -15,7 +15,8 @@ QR *is* the identity exchange.
 ```
 
 ## First run
-1. `brew install agentgate` (phase 3; today: build from source, see README)
+1. `curl -fsSL https://github.com/emrgry/agentgate/releases/latest/download/install.sh | sh`
+   (self-contained release with a bundled Node.js; see README "Install" and docs/releasing.md)
 2. `agentgate setup` → installs/starts the local server as a launchd agent, creates
    the local owner identity, prints a QR.
 3. Phone: install AgentGate → **Scan QR** → paired (one tap).
@@ -44,7 +45,8 @@ QR *is* the identity exchange.
 - Phase 2: optional relay (Cloudflare Worker + Durable Object, free tier). Rooms keyed by
   pairing id; payloads end-to-end encrypted with a key derived from the QR secret. The
   relay sees only ciphertext and timing.
-- Phase 3: distribution — Homebrew/npm package, App Store/TestFlight build.
+- Phase 3: distribution — one-line installer + signed self-updating releases (done, see
+  docs/releasing.md); Homebrew formula and App Store/TestFlight build.
 
 ## Out of scope (for now)
 Hosted multi-tenant backend, email auth, teams.

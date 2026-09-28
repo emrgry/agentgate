@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { z } from "zod";
 import { agentgateHome } from "../config.ts";
+import { layout } from "../install-layout.ts";
 import { EXIT } from "../exit-codes.ts";
 import { c, log, out } from "../output.ts";
 
@@ -24,7 +24,7 @@ export type McpClient = (typeof CLIENTS)[number];
 export const WRAP_MARKER_ENV = "AGENTGATE_MCP_WRAPPED";
 
 export function shimPath(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", "agentgate.sh");
+  return layout().cli;
 }
 
 export function configPath(client: McpClient, project: string | undefined): string {
@@ -123,7 +123,7 @@ export function wrapEntry(name: string, e: Entry): Entry {
     env: {
       ...((env as Record<string, string> | undefined) ?? {}),
       AGENTGATE_HOME: agentgateHome(),
-      AGENTGATE_NODE: process.execPath,
+      AGENTGATE_NODE: layout().node,
       [WRAP_MARKER_ENV]: "1",
     },
   };
@@ -374,7 +374,21 @@ export function mcpUninstall(o: McpInstallOptions): number {
     log.fail(`--client must be one of: ${CLIENTS.join(", ")}`);
     return EXIT.USAGE;
   }
-  const file = configPath(client, o.project);
+  return restoreRecorded(client, configPath(client, o.project), o.servers, o.all);
+}
+
+/** MCP config files AgentGate has wrapped servers in (for `agentgate uninstall`). */
+export function mcpInstalledFiles(): Array<{ client: McpClient; file: string; servers: string[] }> {
+  return Object.values(readRecords()).map((r) => ({ client: r.client, file: r.file, servers: Object.keys(r.servers) }));
+}
+
+/** Restores every wrapped server recorded for `file`. */
+export function mcpUninstallFile(client: McpClient, file: string): number {
+  return restoreRecorded(client, file, [], true);
+}
+
+function restoreRecorded(client: McpClient, file: string, servers: string[], allFlag: boolean): number {
+  const o = { servers, all: allFlag };
   const records = readRecords();
   const rec = records[file];
   if (!rec || !existsSync(file)) {

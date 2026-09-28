@@ -96,8 +96,14 @@ export interface ProfileLoadResult {
   errors: Array<{ file: string; error: string }>;
 }
 
-/** Built-in profiles shipped with AgentGate (profiles/*.yaml). */
-export const BUILTIN_PROFILES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "profiles");
+/**
+ * Built-in profiles shipped with AgentGate (profiles/*.yaml). Source tree: next to src/;
+ * release bundle (lib/*.mjs): copied to lib/profiles by scripts/build-release.mjs.
+ */
+export const BUILTIN_PROFILES_DIR = ((here: string) => {
+  const bundled = join(here, "profiles");
+  return existsSync(bundled) ? bundled : resolve(here, "..", "profiles");
+})(dirname(fileURLToPath(import.meta.url)));
 
 export function parseProfile(text: string, file = "<inline>"): ProviderProfile {
   let raw: unknown;

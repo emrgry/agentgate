@@ -1,0 +1,36 @@
+#!/bin/sh
+# agentgate launcher (release build). Runs the bundled CLI with the bundled Node.js runtime:
+#   <root>/libexec/node <root>/lib/agentgate.mjs "$@"
+# Never uses the caller's node, NODE_OPTIONS or loader variables. If it cannot start, the
+# command it was asked to run never runs: exit 77 (the "blocked" code of `agentgate exec`).
+set -u
+
+# Never let the caller's environment inject code into AgentGate's own node process.
+unset NODE_OPTIONS NODE_PATH NODE_REPL_EXTERNAL_MODULE NODE_ENV BASH_ENV ENV CDPATH
+for __v in $(/usr/bin/env | /usr/bin/sed -nE 's/^((DYLD|LD)_[A-Za-z0-9_]*)=.*/\1/p'); do unset "$__v"; done
+
+fail() {
+  printf 'agentgate: %s — command not executed\n' "$1" >&2
+  exit 77
+}
+
+# Resolve our own location through symlinks, then use the PHYSICAL directory so one
+# invocation runs exactly one installed version even if `current` is flipped meanwhile.
+__self=$0
+while [ -L "$__self" ]; do
+  __link=$(/usr/bin/readlink "$__self") || fail "cannot resolve $__self"
+  case $__link in
+    /*) __self=$__link ;;
+    *) __self=$(/usr/bin/dirname "$__self")/$__link ;;
+  esac
+done
+ROOT=$(cd "$(/usr/bin/dirname "$__self")/.." 2>/dev/null && pwd -P) || fail "cannot locate the agentgate installation"
+NODE="$ROOT/libexec/node"
+ENTRY="$ROOT/lib/agentgate.mjs"
+[ -x "$NODE" ] || fail "bundled node runtime missing ($NODE)"
+[ -f "$ENTRY" ] || fail "agentgate entry point missing ($ENTRY)"
+# A failed exec (wrong CPU type, quarantined binary, …) must still end in 77: bash (macOS
+# /bin/sh) would otherwise exit 126 without running the line below.
+if [ -n "${BASH_VERSION:-}" ]; then shopt -s execfail; fi
+exec "$NODE" "$ENTRY" "$@"
+fail "cannot execute $NODE"

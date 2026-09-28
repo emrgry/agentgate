@@ -192,7 +192,7 @@ export class ClaudeCodeAdapter implements AgentAdapter<PreToolUseInput, PreToolU
 
   /**
    * Self-protection floor. The agent must not reconfigure, bypass or impersonate its own
-   * gate: AgentGate login/logout/install/uninstall/pair/devices, direct calls to credential or
+   * gate: AgentGate login/logout/install/uninstall/pair/devices/setup/update/restart, direct calls to credential or
    * approval endpoints, and edits to AgentGate files or Claude hook settings are denied;
    * anything else touching AgentGate paths must be asked. Pure; never loosens policy.
    */
@@ -206,7 +206,7 @@ export class ClaudeCodeAdapter implements AgentAdapter<PreToolUseInput, PreToolU
       const api = API_ABUSE_RE.exec(cmd);
       if (api) return { decision: "deny", reason: `agents may not call AgentGate credential/approval endpoints directly (${api[0]})` };
       const refs = [this.agentgateHome(), "/.agentgate", "~/.agentgate", ".claude/settings", ...(this.opts.protectedDirs ?? [])];
-      const hit = refs.find((r) => r && cmd.includes(r));
+      const hit = refs.find((r) => r && cmd.includes(r)) ?? (AGENTGATE_DIR_REF_RE.test(cmd) ? ".agentgate" : undefined);
       if (hit) return { decision: "ask", reason: `command touches AgentGate-protected path (${hit})` };
       return null;
     }
@@ -332,9 +332,15 @@ function isWithin(root: string, p: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-/** `agentgate [flags] [--] <login|logout|install|uninstall|pair|devices>` anywhere in a command. */
+/**
+ * `agentgate [flags] [--] <login|logout|install|uninstall|pair|devices|setup|update|restart>`
+ * anywhere in a command (`uninstall` also covers `uninstall-server`). `update` would let an
+ * agent swap or roll back the code that gates it; `setup`/`restart` reconfigure the server.
+ */
 export const SELF_MANAGEMENT_RE =
-  /(?:^|[^\w.-])agentgate(?:\.sh|\.mjs)?['"]?(?:\s+-{1,2}[\w-]+(?:=\S+)?)*\s+(?:--\s+)?(login|logout|install|uninstall|pair|devices)\b/;
+  /(?:^|[^\w.-])agentgate(?:\.sh|\.mjs)?['"]?(?:\s+-{1,2}[\w-]+(?:=\S+)?)*\s+(?:--\s+)?(login|logout|install|uninstall|pair|devices|setup|update|restart)\b/;
+/** A relative reference to an AgentGate install/config dir (`cd ~ && ln -sfn x .agentgate/current`). */
+export const AGENTGATE_DIR_REF_RE = /(?:^|[\s'"=:;&|(])\.agentgate(?:\/|['"\s;&|)]|$)/;
 /** Direct use of AgentGate's credential / approval endpoints. */
 export const API_ABUSE_RE = /\/v1\/(?:pairing|auth\/(?:login|refresh)|devices|approvals\/[^\s/'"]+\/(?:approve|deny|cancel))\b/;
 export * from "./provider.ts";
