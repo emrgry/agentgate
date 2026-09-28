@@ -95,7 +95,7 @@ describe("H2: execution binding", () => {
     const wrapped = await approve(t, "bash s.sh", { PATH: "/usr/bin:/bin:/usr/sbin" });
     // DYLD_* only when SIP is on (every real Mac): SIP-protected shells drop it. GitHub's macOS
     // runners disable SIP, so dyld aborts the shell before anything runs (still fail-closed).
-    const dyld = SIP_ENABLED ? { DYLD_INSERT_LIBRARIES: "/x" } : {};
+    const dyld: Record<string, string> = SIP_ENABLED ? { DYLD_INSERT_LIBRARIES: "/x" } : {};
     const r = await tool(wrapped, { home: t.home, cwd: t.work, env: { NODE_OPTIONS: "--require /tmp/evil.js", GIT_DIR: "/tmp/evil", ...dyld, BASH_ENV: "/x", KEEP_ME: "1" } });
     expect(r.code, `stderr: ${r.stderr}\nsignal: ${(r as { signal?: unknown }).signal}`).toBe(0);
     const env = readFileSync(join(t.work, "envout"), "utf8");
