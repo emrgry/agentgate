@@ -1,0 +1,38 @@
+{
+  "name": "@agentgate/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "agentgate \u2014 local CLI/daemon that routes risky agent actions through human approval.",
+  "type": "module",
+  "bin": {
+    "agentgate": "bin/agentgate.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --root ../.. --project cli"
+  },
+  "dependencies": {
+    "@agentgate/adapter-claude-code": "*",
+    "@agentgate/adapter-codex": "*",
+    "@agentgate/adapter-generic": "*",
+    "@agentgate/core": "*",
+    "@agentgate/policy-engine": "*",
+    "@agentgate/protocol": "*",
+    "@agentgate/signing": "*",
+    "qrcode-terminal": "^0.12.0",
+    "smol-toml": "^1.9.0",
+    "tsx": "^4.19.0",
+    "ws": "^8.21.3",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/qrcode-terminal": "^0.12.2",
+    "@types/ws": "^8.18.1",
+    "vitest": "^3.0.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ]
+}

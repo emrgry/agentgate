@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.expo/
+*.log
+.env
+.env.local
+.data/
+.agentgate/
+.DS_Store
+.claude/settings.local.json
+*.agentgate-backup-*
+.cmp/

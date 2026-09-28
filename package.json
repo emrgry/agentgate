@@ -1,0 +1,34 @@
+{
+  "name": "agentgate",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The human authorization layer between AI agents and the real world.",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/api",
+    "daemon/*",
+    "adapters/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p packages/protocol && tsc -p packages/signing && tsc -p packages/core && tsc -p packages/policy-engine && tsc -p daemon/agentgate && tsc -p adapters/claude-code && tsc -p adapters/codex && tsc -p adapters/generic && tsc -p apps/api",
+    "test": "vitest run",
+    "dev:api": "npm run dev -w @agentgate/api",
+    "demo:slice": "bash scripts/demo-slice.sh",
+    "agentgate": "node daemon/agentgate/bin/agentgate.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emrgry/agentgate"
+  }
+}

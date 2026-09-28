@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mail": {
+      "command": "/ABSOLUTE/PATH/TO/AgentGate/daemon/agentgate/bin/agentgate.sh",
+      "args": ["mcp", "wrap", "--name", "mail", "--", "node", "/ABSOLUTE/PATH/TO/AgentGate/examples/mcp-demo/server.mjs"],
+      "env": { "MCP_DEMO_LOG": "/tmp/agentgate-mcp-demo.log" }
+    }
+  }
+}

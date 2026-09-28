@@ -1,0 +1,55 @@
+# Nous Research Hermes Agent (binary `hermes`). Research-verified CLI facts, NOT run here:
+#   turn:   hermes chat --oneshot -Q --format stream-json --query-file -   (prompt on stdin)
+#   resume: -r <session_id>
+#   events: system{subtype:init,session_id} · text{…delta} · tool_use{name,input} ·
+#           tool_result{name,output,duration_ms,is_error} · result{session_id,exit_code,text,tokens,duration_ms,error?}
+# stream-json was merged 2026-09-15 and may be missing from stable releases: `detect` checks
+# `hermes chat --help` for `--format` and otherwise falls back to text mode (final text only,
+# no resume). Gating: a Hermes shell hook (config.yaml `hooks:`, Claude-style
+# {"decision":"block","reason"}) calling `agentgate hook hermes`, in a per-session
+# HERMES_HOME — firing in one-shot mode is implied but unconfirmed, so the supervisor's
+# tripwire kills the turn if a tool runs without a hook record.
+id: hermes
+display_name: Hermes
+binary: hermes
+command:
+  args: [chat, --oneshot, -Q, --format, stream-json, --query-file, "-"]
+  prompt: { via: stdin }
+resume:
+  args: [chat, --oneshot, -Q, --format, stream-json, -r, "{session_id}", --query-file, "-"]
+output:
+  format: jsonl
+  jsonl:
+    type_field: type
+    session_id: { match: { type: system, subtype: init }, path: session_id }
+    assistant_text: { match: text, path: text, mode: delta }
+    final_text: { match: result, path: text }
+    tool_call: { match: tool_use, name: name, input: input }
+    tool_result: { match: tool_result, output: output, error: is_error }
+    usage: { match: result, path: tokens }
+    error: { match: result, path: error }
+    done: { match: result }
+approval:
+  mode: hook
+  hook:
+    home_env: HERMES_HOME
+    copy_from: ~/.hermes
+    config_file: config.yaml
+    # merged into the copied config.yaml; {hook_command} is AgentGate's hook command
+    config_patch:
+      hooks:
+        PreToolUse:
+          - matcher: ".*"
+            hooks:
+              - type: command
+                command: "{hook_command}"
+signals: { interrupt: SIGINT, terminate: SIGTERM, grace_ms: 5000 }
+success_exit_codes: [0]
+detect:
+  help_args: [chat, --help]
+  contains: "--format"
+  fallback:
+    command:
+      args: [chat, --oneshot, -z, --query-file, "-"]
+      prompt: { via: stdin }
+    output: { format: text }

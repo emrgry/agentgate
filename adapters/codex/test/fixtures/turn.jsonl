@@ -1,0 +1,17 @@
+{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"reasoning","text":"thinking"}}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Listing files**"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"one.txt\ntwo.txt\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"one.txt","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"one.txt","kind":"update"}],"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"todo_list","items":[{"text":"list","completed":false}]}}
+{"type":"item.updated","item":{"id":"item_3","type":"todo_list","items":[{"text":"list","completed":true}]}}
+{"type":"item.started","item":{"id":"item_4","type":"mcp_tool_call","server":"github","tool":"create_issue","arguments":{"title":"x"},"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_4","type":"mcp_tool_call","server":"github","tool":"create_issue","arguments":{"title":"x"},"error":"rate limited","status":"failed"}}
+{"type":"item.started","item":{"id":"item_5","type":"web_search","query":"codex docs"}}
+{"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"I updated one.txt. Should I also update two.txt?"}}
+{"type":"item.completed","item":{"id":"item_7","type":"collab_tool_call","whatever":1}}
+{"type":"future.event","x":1}
+{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"cache_write_input_tokens":0,"output_tokens":122,"reasoning_output_tokens":64}}
