@@ -1,0 +1,1 @@
+{ "hook_event_name": "beforeShellExecution", "command": "git push origin main", "cwd": "/Users/dev/work/demo", "sandbox": false }

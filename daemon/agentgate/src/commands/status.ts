@@ -5,6 +5,7 @@ import { c, log, out } from "../output.ts";
 import { loadEffectivePolicy } from "../policy.ts";
 import { needsRefresh, requireLogin } from "../auth-session.ts";
 import { printInstallState } from "./install.ts";
+import { printCodexInstallState } from "./install-codex.ts";
 
 const OK = () => c.green("ok");
 const BAD = (s: string) => c.red(s);
@@ -29,6 +30,7 @@ export async function statusCommand(): Promise<number> {
     out(`policy        ${BAD(`INVALID — requests will be blocked: ${(err as Error).message}`)}`);
   }
   if (!printInstallState(process.cwd())) healthy = false;
+  if (!printCodexInstallState(process.cwd())) healthy = false;
   if (!config) return EXIT.ERROR;
 
   // Transparent refresh (same path the hooks use), so status reflects what hooks will see.

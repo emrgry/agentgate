@@ -1,0 +1,1 @@
+{ "hook_event_name": "sessionEnd", "session_id": "conv-1111", "reason": "user_close", "duration_ms": 45000, "is_background_agent": false, "final_status": "completed" }

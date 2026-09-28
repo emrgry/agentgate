@@ -205,6 +205,8 @@ export class ClaudeCodeAdapter implements AgentAdapter<PreToolUseInput, PreToolU
       if (m) return { decision: "deny", reason: `agents may not run \`agentgate ${m[1]}\` (it would reconfigure their own gate)` };
       const api = API_ABUSE_RE.exec(cmd);
       if (api) return { decision: "deny", reason: `agents may not call AgentGate credential/approval endpoints directly (${api[0]})` };
+      if (CURSOR_HOOKS_REF_RE.test(cmd)) return { decision: "deny", reason: "agents may not touch Cursor hook settings (.cursor/hooks.json)" };
+      if (CODEX_HOOKS_REF_RE.test(cmd)) return { decision: "deny", reason: "agents may not touch Codex hook settings (.codex/hooks.json, config.toml)" };
       const refs = [this.agentgateHome(), "/.agentgate", "~/.agentgate", ".claude/settings", ...(this.opts.protectedDirs ?? [])];
       const hit = refs.find((r) => r && cmd.includes(r)) ?? (AGENTGATE_DIR_REF_RE.test(cmd) ? ".agentgate" : undefined);
       if (hit) return { decision: "ask", reason: `command touches AgentGate-protected path (${hit})` };
@@ -219,6 +221,8 @@ export class ClaudeCodeAdapter implements AgentAdapter<PreToolUseInput, PreToolU
         if (isWithin(d, p)) return { decision: "deny", reason: `agents may not modify AgentGate itself (${d})` };
       }
       if (/(^|\/)\.claude\/settings(\.local)?\.json$/.test(p)) return { decision: "deny", reason: "agents may not modify Claude Code hook settings" };
+      if (CURSOR_HOOKS_PATH_RE.test(p)) return { decision: "deny", reason: "agents may not modify Cursor hook settings" };
+      if (CODEX_HOOKS_PATH_RE.test(p)) return { decision: "deny", reason: "agents may not modify Codex hook settings" };
       return null;
     }
     if (tool === "Read") {
@@ -274,6 +278,8 @@ export function sensitivePathReason(absPath: string, o: PathOpts): string | null
   if (within(o.agentgateHome ?? join(o.homeDir, ".agentgate"))) return "writes AgentGate's own config";
   for (const d of o.protectedDirs ?? []) if (within(d)) return `writes AgentGate itself (${d})`;
   if (within(join(o.homeDir, ".claude")) || parts.includes(".claude")) return "writes Claude Code configuration (.claude/)";
+  if (CURSOR_HOOKS_PATH_RE.test(p)) return "writes Cursor hook configuration (hooks.json)";
+  if (CODEX_HOOKS_PATH_RE.test(p)) return "writes Codex hook configuration (.codex/hooks.json, config.toml)";
   if (/^\.env(\..*)?$/.test(base) || base.endsWith(".env")) return `writes environment/secrets file ${base}`;
   if (/\.(pem|key|p12|pfx|jks|keystore)$/i.test(base)) return `writes key material ${base}`;
   if (/^id_[A-Za-z0-9_-]+(\.pub)?$/.test(base)) return `writes SSH key ${base}`;
@@ -341,6 +347,14 @@ export const SELF_MANAGEMENT_RE =
   /(?:^|[^\w.-])agentgate(?:\.sh|\.mjs)?['"]?(?:\s+-{1,2}[\w-]+(?:=\S+)?)*\s+(?:--\s+)?(login|logout|install|uninstall|pair|devices|setup|update|restart)\b/;
 /** A relative reference to an AgentGate install/config dir (`cd ~ && ln -sfn x .agentgate/current`). */
 export const AGENTGATE_DIR_REF_RE = /(?:^|[\s'"=:;&|(])\.agentgate(?:\/|['"\s;&|)]|$)/;
+/** Cursor hook config files (user / project / enterprise): editing them disables the Cursor gate. */
+export const CURSOR_HOOKS_PATH_RE = /(^|\/)\.cursor\/hooks\.json$|\/Application Support\/Cursor\/hooks\.json$|^\/etc\/cursor\/hooks\.json$/;
+/** A shell command naming a Cursor dir AND a hooks.json anywhere (`cd ~/.cursor && cp x hooks.json`). */
+export const CURSOR_HOOKS_REF_RE = /^(?=[\s\S]*(?:\.cursor\b|\/Cursor\b|\/etc\/cursor\b))(?=[\s\S]*hooks['"]?\.json)/;
+/** Codex hook/config files (user CODEX_HOME or project .codex/): editing them removes or disables the Codex gate. */
+export const CODEX_HOOKS_PATH_RE = /(^|\/)\.codex\/(hooks\.json|config\.toml|requirements\.toml)$/;
+/** A shell command naming a .codex dir AND a hooks.json/config.toml anywhere (`cd ~/.codex && cp x hooks.json`). */
+export const CODEX_HOOKS_REF_RE = /^(?=[\s\S]*\.codex\b)(?=[\s\S]*(?:hooks['"]?\.json|config['"]?\.toml|requirements['"]?\.toml))/;
 /** Direct use of AgentGate's credential / approval endpoints. */
 export const API_ABUSE_RE = /\/v1\/(?:pairing|auth\/(?:login|refresh)|devices|approvals\/[^\s/'"]+\/(?:approve|deny|cancel))\b/;
 export * from "./provider.ts";

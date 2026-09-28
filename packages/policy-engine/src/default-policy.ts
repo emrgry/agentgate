@@ -71,6 +71,11 @@ rules:
         - "**/.mcp.json"
         - "~/.codex/config.toml"
         - "~/.claude.json"
+        - "~/.cursor/hooks.json"
+        - "**/.cursor/hooks.json"
+        - "~/.codex/hooks.json"
+        - "**/.codex/hooks.json"
+        - "**/.codex/config.toml"
     decision: deny
 
   # MCP tools that are destructive / financial / outbound / exec by name, annotation or

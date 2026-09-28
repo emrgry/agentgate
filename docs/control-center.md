@@ -138,11 +138,175 @@ PreToolUse/PostToolUse hook settings.
     `filesystem.write` (with the patch paths and sensitive-path risk), and `mcp__*` to
     `mcp.invoke`. Any other tool becomes `tool.invoke` with high risk.
   - It asks the phone when the policy says so. Deny means exit 2 with the reason on stderr.
-  - Codex can't take a rewritten input, so an approved token is verified **and consumed in
-    the hook** for every tool, including Bash.
+  - An approved token is verified **and consumed in the hook** for every tool, including
+    Bash. (Codex does accept a rewritten input, but a rewritten `agentgate exec …` would run
+    inside Codex's sandbox, which can't write `~/.agentgate` or reach the server; see below.)
+  - Self-protection (`codexGuard`) and the Bash exec-context binding + re-check described
+    under "Interactive Codex" apply to managed turns too.
 - **Version:** `codex --version` must parse and be ≥ `AGENTGATE_CODEX_MIN_VERSION`
-  (default 0.40.0). Otherwise every turn fails closed.
+  (default 0.40.0). Otherwise every turn fails closed. The hook contract below was only
+  verified on 0.131.0–0.158.0.
 - **Cost:** Codex reports tokens only, so `usage.cost_usd` stays null.
+
+### Interactive Codex (`agentgate install codex`)
+Gates the user's normal Codex — `codex` in a terminal, `codex exec`, and (not run here) the
+IDE extension / app, which use the same `CODEX_HOME` — not only Control Center turns.
+
+```bash
+agentgate install codex --user --yes      # every Codex session for this OS user (recommended)
+agentgate install codex --project DIR     # only DIR (loads only when Codex trusts the project)
+agentgate uninstall codex [--user | --project DIR]
+```
+
+What it writes (backups next to each file; `agentgate uninstall codex` and the full
+`agentgate uninstall` restore the original bytes if the file wasn't edited since, otherwise
+remove only our entries):
+- `<CODEX_HOME>/hooks.json` (default `~/.codex`; `$CODEX_HOME` is honored) or
+  `<DIR>/.codex/hooks.json`: a `PreToolUse` group with no matcher (every tool, timeout 600 s)
+  and a `SessionEnd` group (3 s), appended after the user's groups. The command is
+  `AGENTGATE_HOME=… AGENTGATE_NODE=… AGENTGATE_HOOK_TIMEOUT_S=600 AGENTGATE_CODEX_INSTALL=user|project
+  ~/.agentgate/current/bin/agentgate-hook.sh --agentgate-provider=codex --agentgate-install=codex/v1`
+  (the checkout's `daemon/agentgate/bin/agentgate-hook.sh` in dev) — absolute paths, no tokens.
+- `<CODEX_HOME>/config.toml` (always the user file, also for `--project`): a marked block of
+  `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"] trusted_hash = "sha256:…"`
+  tables. Codex **skips non-managed hooks that aren't trusted**, silently, so without this
+  the install would gate nothing. If the file can't safely take new tables (an inline
+  `hooks = {…}`/`hooks.state = {…}`, or an existing entry for our key), the hook is still
+  installed but the command warns loudly and asks the user to trust it in Codex's `/hooks`.
+  Codex edits `config.toml` itself (e.g. when you trust a project) and may insert its tables
+  inside our marked block; uninstall then removes exactly our `hooks.state` tables and the
+  markers and keeps Codex's additions (verified with 0.158).
+- `$AGENTGATE_HOME/codex-installs.json`: the install record (for uninstall).
+
+`agentgate status` shows whether the hook is installed **and trusted**, whether hooks are
+turned off in config.toml, and when the hook last ran.
+
+**Hook behavior** (`agentgate hook codex` with `AGENTGATE_CODEX_INSTALL` set):
+1. Tools that run and write nothing (`update_plan`, goal tools, `request_user_input`,
+   `tool_search`, subagent control, `view_image` of a non-secret file) exit 0 without a
+   round trip. Everything else is governed; unknown/future tools are high risk (→ ask).
+2. `codexGuard` floor: `agentgate install|uninstall|login|pair|update|…`, AgentGate's
+   credential/approval endpoints, AgentGate's own files, `.codex/hooks.json|config.toml|
+   requirements.toml` (user or project, and a custom `CODEX_HOME`), Claude and Cursor hook
+   settings → **deny** (exit 2, nothing submitted). Nested `codex` launched with another
+   `CODEX_HOME`/hook bypass, commands touching AgentGate paths, and bare interactive
+   interpreters (`python3`, `bash -i`, `psql` … — later `write_stdin` input is never hooked)
+   → at least **ask**.
+3. Policy → allow (exit 0, no stdout) / deny (exit 2 + reason) / ask: the approval is created
+   and pushed, the hook **blocks** until the phone's signed decision arrives, verifies the
+   token against the pinned key (and pinned device keys when device signatures are
+   required), consumes its one-time nonce, and only then exits 0.
+4. Bash approvals carry the exec context (resolved binaries, script hashes, push target;
+   `git_hooks: "allowed"`, since nothing can disable git hooks without an exec wrapper). The
+   context is recomputed right before allowing; any difference → exit 2 ("changed while
+   waiting for approval"), so a script rewritten while the phone was deciding is caught.
+5. Deadline: the hook stops itself at `AGENTGATE_HOOK_TIMEOUT_S − 30` s (570 s), well before
+   Codex's 600 s timeout (a timeout would fail open), withdraws the approval from the phone
+   and blocks with "nothing was run; ask Codex to retry and approve the request on your
+   phone". The approval TTL (`--ttl`, default 120 s) usually ends the wait first.
+6. Server unreachable, logged out, bad input, crash, missing node → exit 2 with a reason.
+7. `SessionEnd`: withdraws still-pending approvals and ends the hook-managed AgentGate
+   session (`codex:<session_id>`), within Codex's 3 s cap.
+8. A **project** install inside a Control Center turn (CODEX_HOME = a supervisor-prepared
+   home under `$AGENTGATE_HOME` whose hooks.json runs the managed hook, and the matching
+   receipts file) exits 0 and lets the managed hook gate — no double approvals. A user
+   install is never loaded in managed turns (their CODEX_HOME is different). Managed homes
+   copy the owner's `config.toml`, including our trust block; it's inert there.
+
+**What is gated / not gated**
+
+| Gated | Not gated |
+|---|---|
+| Shell (`exec_command`/`shell` → `Bash`) | `write_stdin` into an already-running command (Codex never hooks it; hence the ask floor on bare interpreters) |
+| `apply_patch` (every file in the patch) | Hosted tools (web search) — no local code runs |
+| MCP tool calls (`mcp__server__tool`) | Anything Codex runs outside the tool path ("specialized tool paths can opt out", per the docs) |
+| Other local function tools (unknown → ask) | A nested agent/Codex the agent launches with its own config (the launch itself is asked) |
+| Sensitive `view_image` reads | Codex versions without hooks / hooks turned off / the hook untrusted — Codex then runs ungated; `agentgate status` reports it |
+
+**Residual risks**
+- **Fail-open surfaces owned by Codex.** Exit codes other than 2, exit 2 with empty stderr,
+  a crash or the hook timeout all let the tool run. The shim maps everything but 0/2 to 2
+  with a reason, and the node deadline fires 30 s early, but a killed/hung shell before the
+  shim runs, or the machine sleeping through the 600 s, would fail open.
+- **Trust is Codex's switch.** Anyone who can edit `hooks.json` or `config.toml` can untrust,
+  disable (`[features] hooks = false`, `hooks.state.<key>.enabled = false`) or remove the
+  hook; so can the user in `/hooks`. The guard and the default policy deny agent writes to
+  those files, and the trust key includes the group index, so the user inserting a group
+  *before* ours also untrusts it (status shows NOT GATING; re-run install).
+- **TOCTOU.** There is no `agentgate exec` wrapper: after the hook returns, Codex runs the
+  command itself. The command text can't change (Codex runs the tool input it passed us,
+  and the token is bound to it), and the exec context is re-checked at the last moment, but
+  a change in the milliseconds between hook exit and execution isn't caught; PATH can also
+  differ because Codex runs commands in a login shell (`zsh -lc`). Git hooks are not
+  disabled for approved commands.
+- **Another PreToolUse hook's `updatedInput` wins.** Hooks run concurrently and the last
+  rewrite applies; a user's own rewriting hook could change an approved command. Install
+  warns when other PreToolUse hooks exist.
+- **`workdir` is invisible.** Codex's shell tool can run in a `workdir` the hook input
+  doesn't include; relative paths, repo/branch context and exec-context resolution use the
+  session `cwd`.
+- **Hook sessions** are registered under the machine's `claude-code` agent record (shared
+  helper); actions still carry `agent.type: "codex"`.
+
+#### Codex hooks contract (verified)
+Sources: the official docs <https://developers.openai.com/codex/hooks> (`.md` version),
+<https://github.com/openai/codex/blob/main/docs/config.md>, the generated schemas in
+<https://github.com/openai/codex/tree/main/codex-rs/hooks/schema/generated>
+(`pre-tool-use.command.{input,output}.schema.json`) and the implementation in
+`codex-rs/hooks/src/events/pre_tool_use.rs`, `codex-rs/hooks/src/engine/{output_parser,discovery}.rs`,
+`codex-rs/hooks/src/config_rules.rs`, `codex-rs/hooks/src/lib.rs` (`hook_key`),
+`codex-rs/config/src/{hook_config,fingerprint}.rs` and `codex-rs/utils/home-dir/src/lib.rs`
+(openai/codex `main`, 2026-09-28). **Run-verified** by driving the real `@openai/codex`
+binaries 0.131.0, 0.132.0, 0.133.0, 0.136.0, 0.138.0, 0.140.0, 0.150.0 and 0.158.0 against a
+mock Responses API with a temp `HOME`/`CODEX_HOME`, and 0.158.0 end to end through
+`agentgate install codex` + a fake AgentGate server (allow, ask→approve, ask→deny, policy
+deny, guard deny, apply_patch, deadline, server down, project scope, SessionEnd).
+
+- **Config:** `hooks.json` next to each active config layer, or inline `[hooks]` in
+  `config.toml`: `~/.codex/hooks.json` (really `$CODEX_HOME`; `$CODEX_HOME` is canonicalized,
+  `~/.codex` is not), `~/.codex/config.toml`, `<repo>/.codex/hooks.json|config.toml`
+  (per the docs the project layer loads only when Codex trusts the project; verified that it
+  loads in a trusted project, also when Codex starts in a subdirectory). All matching hooks from all layers run, concurrently. `hooks.json` accepts
+  only `description` and `hooks` at the top level. Hooks are on by default (`[features]
+  hooks = false`, deprecated alias `codex_hooks`, turns them off); admins can force
+  `allow_managed_hooks_only` in `requirements.toml`.
+- **Trust:** non-managed hooks run only if `hooks.state."<key>".trusted_hash` in the **user**
+  `config.toml` (or `-c` session flags) equals the current hash; otherwise they're skipped
+  (verified: untrusted and hash-mismatched hooks don't run; no error in `codex exec`).
+  `key = "<abs hooks.json path>:<event_snake>:<group idx>:<handler idx>"`;
+  `hash = "sha256:" + sha256(key-sorted compact JSON of {event_name, matcher?, hooks:[{type,
+  command, timeout, async, statusMessage?, additionalContextLimit?}]})` with the timeout
+  normalized. `/hooks` in the TUI reviews/trusts; `--dangerously-bypass-hook-trust` skips the
+  check for one invocation (Control Center turns use it).
+- **Events:** PreToolUse, PermissionRequest, PostToolUse, Pre/PostCompact, SessionStart/End,
+  UserPromptSubmit, SubagentStart/Stop, Stop, Interrupt. Matcher = regex on the tool name;
+  omitted/`*`/`""` = all.
+- **PreToolUse stdin:** `{session_id, turn_id, transcript_path, cwd, hook_event_name, model,
+  permission_mode, tool_name, tool_input, tool_use_id}` (+ `agent_id/agent_type` for
+  subagents). Shell/unified exec → `tool_name: "Bash"`, `tool_input: {command: "<string>"}`
+  (no `workdir`); `apply_patch` → `{command: "<patch>"}` (the adapter used to read
+  `input`/`patch` only — **fixed**); MCP → `mcp__<server>__<tool>` with the arguments; other
+  local tools by name (`spawn_agent` also matches `Agent`). Hosted tools and `write_stdin`
+  don't run PreToolUse.
+- **Deny:** exit 2 **with non-empty stderr** (verified), or stdout
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
+  "permissionDecisionReason":"…"}}` (verified), or legacy `{"decision":"block","reason":…}`.
+- **Fail-open (verified):** exit 2 with empty stderr, exit 1/any other code, a crash, the hook
+  timeout (default 600 s; SessionEnd/Interrupt 1 s, max 3 s), `permissionDecision: "ask"`,
+  `allow` without `updatedInput`, and `continue/stopReason/suppressOutput` are all treated as
+  "hook failed" and the tool runs.
+- **Blocking and waiting:** synchronous hooks block the tool until they exit (verified with a
+  30 s sleep and 20 s timeout → killed at 20 s, tool ran). Hooks run **outside** Codex's
+  sandbox (verified: network + writes outside the workspace work), while the command itself
+  runs sandboxed (`workspace-write`: no writes outside the workspace/tmp, no network —
+  verified), which is why an `agentgate exec` rewrite can't work.
+- **Rewriting:** `permissionDecision: "allow"` + `updatedInput` (`{command: string}` for
+  Bash/apply_patch, the argument object for MCP/other tools) replaces the input (verified on
+  0.133 and 0.158); with several hooks the last to finish wins.
+- **Minimum version:** hooks.json + trust + exit-2 blocking verified on 0.131.0–0.158.0.
+  **Not verified:** ≤ 0.130.0 (those builds are SIGKILLed on the macOS used here), the TUI
+  and IDE extension/app (same hooks engine, not run), MCP payloads (docs only),
+  PermissionRequest, Windows.
 
 ### Generic providers (`adapters/generic`, providers.yaml)
 Profiles are the built-in `adapters/generic/profiles/*.yaml` (currently Hermes) plus

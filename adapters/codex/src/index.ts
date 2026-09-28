@@ -1,8 +1,18 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { isAbsolute, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentProvider, NormalizedEvent, TurnCommand } from "@agentgate/adapters";
-import { isQuestion, sensitivePathRisk } from "@agentgate/adapter-claude-code";
+import {
+  AGENTGATE_DIR_REF_RE,
+  API_ABUSE_RE,
+  CODEX_HOOKS_PATH_RE,
+  CODEX_HOOKS_REF_RE,
+  CURSOR_HOOKS_PATH_RE,
+  CURSOR_HOOKS_REF_RE,
+  isQuestion,
+  SELF_MANAGEMENT_RE,
+  sensitivePathRisk,
+} from "@agentgate/adapter-claude-code";
 import { ActionDraft } from "@agentgate/protocol";
 
 /**
@@ -234,6 +244,17 @@ export function codexProvider(o: CodexProviderOptions): AgentProvider {
 }
 
 // ── PreToolUse hook (gating) ─────────────────────────────────────────────────────────
+//
+// Verified against the Codex hooks docs (developers.openai.com/codex/hooks) and by running
+// codex-cli 0.131.0–0.158.0 against a mock model (docs/control-center.md, "Codex hooks"):
+//   stdin   {session_id, turn_id, transcript_path, cwd, hook_event_name:"PreToolUse", model,
+//            permission_mode, tool_name, tool_input, tool_use_id}
+//   tools   shell/unified exec → tool_name "Bash", tool_input {command: string} (the model's
+//           `workdir` is NOT included); apply_patch → tool_input {command: <patch text>};
+//           MCP → "mcp__<server>__<tool>" with the arguments; other local tools by name.
+//   block   exit 2 + non-empty stderr, or {"hookSpecificOutput":{…"permissionDecision":"deny",
+//           "permissionDecisionReason":…}}. Exit 2 with EMPTY stderr, any other exit code,
+//           a crash or the hook timeout all FAIL OPEN (the tool runs).
 
 export interface CodexHookInput {
   session_id?: string;
@@ -257,6 +278,14 @@ export function parseCodexHookInput(raw: unknown): CodexHookInput {
 }
 
 const sha = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
+
+/**
+ * The apply_patch payload. Real Codex sends it as `tool_input.command` (verified 0.131–0.158);
+ * `input`/`patch`/`content` are kept for older/synthetic payloads.
+ */
+export function codexPatchText(ti: Record<string, unknown>): string {
+  return str(ti.command) ?? str(ti.input) ?? str(ti.patch) ?? str(ti.content) ?? "";
+}
 
 /**
  * Codex PreToolUse → canonical action. Bash → shell.execute; apply_patch (aliases
@@ -283,7 +312,7 @@ export function normalizeCodexHook(
     return ActionDraft.parse({ ...base, action: { category: "shell", operation: "execute", tool: "Bash", command, cwd: input.cwd }, resource: { ...env } });
   }
   if (tool === "apply_patch" || tool === "Edit" || tool === "Write") {
-    const patch = str(ti.input) ?? str(ti.patch) ?? str(ti.content) ?? "";
+    const patch = codexPatchText(ti);
     const rel = patchPaths(patch);
     const direct = str(ti.file_path) ?? str(ti.path);
     const paths = (rel.length ? rel : direct ? [direct] : []).map((p) => (isAbsolute(p) ? resolve(p) : resolve(input.cwd, p)));
@@ -317,10 +346,156 @@ export function codexReceiptFacts(input: CodexHookInput): { kind: "shell" | "fil
   const t = input.tool_name;
   if (t === "Bash" || t === "shell" || t === "exec_command") return { kind: "shell", text: commandText(input.tool_input.command ?? input.tool_input.cmd), paths: [] };
   if (t === "apply_patch" || t === "Edit" || t === "Write") {
-    const patch = str(input.tool_input.input) ?? str(input.tool_input.patch) ?? "";
+    const patch = codexPatchText(input.tool_input);
     const direct = str(input.tool_input.file_path) ?? str(input.tool_input.path);
     return { kind: "file", text: "", paths: patchPaths(patch).concat(direct ? [direct] : []) };
   }
   if (t.startsWith("mcp__")) return { kind: "mcp", text: t, paths: [] };
   return { kind: "other", text: t, paths: [] };
+}
+
+// ── Interactive Codex (`agentgate install codex`): tool classes + self-protection ─────
+
+const SHELL_TOOLS = new Set(["Bash", "shell", "exec_command"]);
+const PATCH_TOOLS = new Set(["apply_patch", "Edit", "Write"]);
+
+/**
+ * Local Codex tools that run nothing and write nothing: planning, goals, questions to the
+ * user, tool discovery and subagent orchestration (subagents' own tool calls are hooked
+ * separately). The interactive hook lets them through without a round trip; everything
+ * else — including tools Codex adds later — is governed (unknown → high risk → ask).
+ */
+export const CODEX_BENIGN_TOOLS: ReadonlySet<string> = new Set([
+  "update_plan",
+  "request_user_input",
+  "get_goal",
+  "create_goal",
+  "update_goal",
+  "tool_search",
+  "multi_agent_v1",
+  "spawn_agent",
+  "send_input",
+  "wait",
+  "wait_agent",
+  "close_agent",
+  "resume_agent",
+  "list_agents",
+]);
+
+export interface CodexGuardOptions {
+  homeDir: string;
+  /** $AGENTGATE_HOME (config, tokens, nonces, server data). */
+  agentgateHome: string;
+  /** AgentGate code/install/secrets dirs (see install-layout.ts). */
+  protectedDirs: string[];
+  /** The CODEX_HOME in effect (default ~/.codex). */
+  codexHome?: string;
+}
+
+export interface CodexGuardVerdict {
+  decision: "ask" | "deny";
+  reason: string;
+}
+
+/**
+ * `codex` started with a different hook/config home or with hooks bypassed/disabled — that
+ * nested Codex would run without the installed AgentGate hook.
+ */
+export const CODEX_UNGATED_LAUNCH_RE =
+  /(?:^|[^\w./-])(?:CODEX_HOME=|codex\b[^\n;&|]*?(?:--dangerously-bypass-hook-trust|--disable[= ]+(?:codex_)?hooks|(?:-c|--config)[= ]+['"]?(?:features\.(?:codex_)?hooks|hooks[.=]|allow_managed_hooks_only)))/;
+/** An interactive interpreter with no script/command: its later input (write_stdin) is never hooked. */
+export const INTERACTIVE_SHELL_RE = /^\s*(?:bash|sh|zsh|dash|ksh|fish|python3?|node|irb|ruby|perl|php|lua|R|psql|mysql|sqlite3|redis-cli|mongosh)(?:\s+-i)?\s*$/;
+
+function within(root: string, p: string): boolean {
+  const rel = relative(resolve(root), resolve(p));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function absPath(p: string, cwd: string, home: string): string {
+  if (p === "~") return home;
+  if (p.startsWith("~/")) return resolve(home, p.slice(2));
+  return isAbsolute(p) ? resolve(p) : resolve(cwd, p);
+}
+
+/** Paths an interactive tool call would touch (apply_patch targets, view_image path). */
+export function codexToolPaths(input: CodexHookInput, home: string): string[] {
+  const ti = input.tool_input;
+  if (PATCH_TOOLS.has(input.tool_name)) {
+    const rel = patchPaths(codexPatchText(ti));
+    const direct = str(ti.file_path) ?? str(ti.path);
+    return (rel.length ? rel : direct ? [direct] : []).map((p) => absPath(p, input.cwd, home));
+  }
+  const p = str(ti.path) ?? str(ti.file_path);
+  return p ? [absPath(p, input.cwd, home)] : [];
+}
+
+function sensitiveRead(p: string, o: CodexGuardOptions): string | null {
+  const base = basename(p);
+  if (within(o.agentgateHome, p)) return "reads AgentGate's own config/tokens";
+  if (within(join(o.homeDir, ".ssh"), p)) return "reads inside ~/.ssh";
+  if (/^\.env(\..*)?$/.test(base) || base.endsWith(".env")) return `reads environment/secrets file ${base}`;
+  return null;
+}
+
+/**
+ * "benign": let through without asking anyone (interactive installs only).
+ * "gated":  normalize → policy → maybe the phone.
+ */
+export function codexToolClass(input: CodexHookInput, o: CodexGuardOptions): "benign" | "gated" {
+  if (CODEX_BENIGN_TOOLS.has(input.tool_name)) return "benign";
+  if (input.tool_name === "view_image") {
+    const paths = codexToolPaths(input, o.homeDir);
+    return paths.length === 1 && !sensitiveRead(paths[0]!, o) ? "benign" : "gated";
+  }
+  return "gated";
+}
+
+/**
+ * Self-protection floor for Codex hooks (managed and interactive). Mirrors the Claude
+ * adapter guard: the agent must not reconfigure, bypass or impersonate its own gate —
+ * `agentgate install/uninstall/…`, AgentGate's credential/approval endpoints, AgentGate's
+ * files, and the Codex/Claude/Cursor hook configuration are denied; anything else touching
+ * AgentGate paths, nested ungated Codex launches and bare interactive interpreters are
+ * asked. Pure; can only make a decision stricter.
+ */
+export function codexGuard(input: CodexHookInput, o: CodexGuardOptions): CodexGuardVerdict | null {
+  const tool = input.tool_name;
+  const codexHome = o.codexHome ?? join(o.homeDir, ".codex");
+  if (SHELL_TOOLS.has(tool)) {
+    const cmd = commandText(input.tool_input.command ?? input.tool_input.cmd);
+    const m = SELF_MANAGEMENT_RE.exec(cmd);
+    if (m) return { decision: "deny", reason: `agents may not run \`agentgate ${m[1]}\` (it would reconfigure their own gate)` };
+    const api = API_ABUSE_RE.exec(cmd);
+    if (api) return { decision: "deny", reason: `agents may not call AgentGate credential/approval endpoints directly (${api[0]})` };
+    if (CODEX_HOOKS_REF_RE.test(cmd) || (cmd.includes(codexHome) && /hooks['"]?\.json|config['"]?\.toml/.test(cmd))) {
+      return { decision: "deny", reason: "agents may not touch Codex hook settings (~/.codex/hooks.json, config.toml)" };
+    }
+    if (CURSOR_HOOKS_REF_RE.test(cmd)) return { decision: "deny", reason: "agents may not touch Cursor hook settings (.cursor/hooks.json)" };
+    if (CODEX_UNGATED_LAUNCH_RE.test(cmd)) return { decision: "ask", reason: "starts Codex with a different hook configuration (that Codex would run without AgentGate)" };
+    const refs = [o.agentgateHome, "/.agentgate", "~/.agentgate", ".claude/settings", ...o.protectedDirs];
+    const hit = refs.find((r) => r && cmd.includes(r)) ?? (AGENTGATE_DIR_REF_RE.test(cmd) ? ".agentgate" : undefined);
+    if (hit) return { decision: "ask", reason: `command touches AgentGate-protected path (${hit})` };
+    if (INTERACTIVE_SHELL_RE.test(cmd)) {
+      return { decision: "ask", reason: "starts an interactive session: what Codex types into it later (write_stdin) is not checked by AgentGate" };
+    }
+    return null;
+  }
+  if (PATCH_TOOLS.has(tool)) {
+    for (const p of codexToolPaths(input, o.homeDir)) {
+      if (within(o.agentgateHome, p)) return { decision: "deny", reason: "agents may not modify AgentGate's config/tokens" };
+      for (const d of o.protectedDirs) if (within(d, p)) return { decision: "deny", reason: `agents may not modify AgentGate itself (${d})` };
+      if (CODEX_HOOKS_PATH_RE.test(p) || (within(codexHome, p) && /^(hooks\.json|config\.toml|requirements\.toml)$/.test(basename(p)))) {
+        return { decision: "deny", reason: "agents may not modify Codex hook settings" };
+      }
+      if (/(^|\/)\.claude\/settings(\.local)?\.json$/.test(p)) return { decision: "deny", reason: "agents may not modify Claude Code hook settings" };
+      if (CURSOR_HOOKS_PATH_RE.test(p)) return { decision: "deny", reason: "agents may not modify Cursor hook settings" };
+    }
+    return null;
+  }
+  if (tool === "view_image") {
+    const [p] = codexToolPaths(input, o.homeDir);
+    const reason = p ? sensitiveRead(p, o) : null;
+    return reason ? { decision: "ask", reason } : null;
+  }
+  return null;
 }

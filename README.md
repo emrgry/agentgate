@@ -30,7 +30,7 @@ distributed through the App Store and Google Play.
   or network cannot forge an approval.
 - **Fail-closed.** If AgentGate cannot decide, the action does not run.
 - **Agent-agnostic.** A canonical action protocol with adapters for Claude Code (PreToolUse
-  hooks), Codex, generic hook-based agents and any MCP server (`agentgate mcp wrap`).
+  hooks), Cursor (agent hooks), Codex, generic hook-based agents and any MCP server (`agentgate mcp wrap`).
 
 Design documents: [architecture](docs/architecture.md), [local-first trust model](docs/local-first.md),
 [control center](docs/control-center.md).
@@ -50,8 +50,28 @@ your phone. Then gate your agents:
 
 ```bash
 agentgate install claude-code            # this project (or --user --yes for every session)
+agentgate install cursor --user --yes    # Cursor's agent: terminal, file edits, MCP calls, sensitive reads
+agentgate install codex --user --yes     # your normal Codex (terminal, codex exec, IDE): shell, apply_patch, MCP
 agentgate mcp install --client cursor --all
 ```
+
+**Cursor.** `agentgate install cursor --user --yes` adds fail-closed hooks to
+`~/.cursor/hooks.json` (`--project DIR` for one trusted workspace). Cursor's agent then waits
+for AgentGate before it runs a terminal command, edits or deletes a file, calls an MCP tool or
+reads a secret. When a call needs approval, you approve it on your phone. MCP servers that are
+already wrapped by `agentgate mcp install` are left to the gateway, so nothing is asked twice.
+`agentgate uninstall cursor --user` restores the file. Details and residual risks:
+[docs/cursor.md](docs/cursor.md).
+
+**Codex.** `agentgate install codex --user --yes` adds a fail-closed PreToolUse hook to
+`~/.codex/hooks.json` (`$CODEX_HOME` is honored; `--project DIR` for one project) and marks it
+trusted in `~/.codex/config.toml`, because Codex silently skips untrusted hooks. Every shell
+command, `apply_patch` edit and MCP call of your interactive Codex then goes through the
+policy; when it needs approval, Codex waits until you approve or deny on your phone (up to
+the approval TTL, then it's blocked and you approve when Codex retries). Restart running Codex
+sessions afterwards; `agentgate status` shows whether the hook is trusted and when it last
+ran. `agentgate uninstall codex --user` restores both files. Needs Codex ≥ 0.131. Details and
+residual risks: [docs/control-center.md](docs/control-center.md#interactive-codex-agentgate-install-codex).
 
 Options: `sh install.sh --dry-run` shows what it would do, `--no-setup` installs only,
 `AGENTGATE_VERSION=0.2.0` pins a version. If `~/.local/bin` is not on your `PATH`, the

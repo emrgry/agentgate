@@ -9,6 +9,9 @@ import { versionCommand } from "./commands/version.ts";
 import { mcpInstall, mcpStatus, mcpUninstall, mcpWrap } from "./commands/mcp.ts";
 import { execCommand } from "./commands/exec.ts";
 import { hookCommand } from "./commands/hook.ts";
+import { cursorHookCommand } from "./commands/hook-cursor.ts";
+import { installCursorCommand, uninstallCursorCommand } from "./commands/install-cursor.ts";
+import { installCodexCommand, uninstallCodexCommand } from "./commands/install-codex.ts";
 import { providerHookCommand } from "./commands/hook-provider.ts";
 import { installCommand, uninstallCommand } from "./commands/install.ts";
 import { devicesCommand } from "./commands/devices.ts";
@@ -50,12 +53,17 @@ Usage:
   agentgate run claude [--env ENV] [--ttl SECONDS] [-- <claude args...>]
   agentgate install claude-code   [--project <dir> (default: cwd) | --user --yes] [--env ENV] [--ttl SECONDS]
   agentgate uninstall claude-code [--project <dir> | --user]
+  agentgate install cursor        [--project <dir> (default: cwd) | --user --yes] [--env ENV] [--ttl SECONDS]
+  agentgate uninstall cursor      [--project <dir> | --user]      (Cursor agent hooks: shell, file edits, MCP)
+  agentgate install codex         [--project <dir> (default: cwd) | --user --yes] [--env ENV] [--ttl SECONDS]
+  agentgate uninstall codex       [--project <dir> | --user]      (interactive Codex: PreToolUse hook + trust)
   agentgate mcp wrap [--name N] [--env E] [--ttl S] -- <upstream MCP server command…>   (stdio MCP gateway)
   agentgate mcp install   --client <claude-desktop|cursor|claude-code|codex> [--project DIR] (--server NAME… | --all)
   agentgate mcp uninstall --client <…> [--project DIR] [--server NAME… | --all]
   agentgate mcp status [--project DIR]
   agentgate exec --approval <apr_id> -- <command>     (used by rewritten Claude Code Bash calls)
   agentgate hook claude-code                          (Claude Code PreToolUse hook; reads stdin)
+  agentgate hook cursor                               (Cursor agent hook; reads stdin, answers permission JSON)
   agentgate hook codex|<provider>                     (Codex / providers.yaml PreToolUse hook; Control Center)
 
 Global flags: -v/--verbose  -h/--help  --version
@@ -215,6 +223,12 @@ export async function main(argv: string[]): Promise<number> {
         if (v === null) return EXIT.OK;
         const ttl = v.ttl === undefined ? undefined : Number(v.ttl);
         if (ttl !== undefined && (!Number.isInteger(ttl) || ttl <= 0)) throw new UsageError("--ttl must be a positive integer");
+        if (v._positionals[0] === "codex") {
+          return await installCodexCommand({ project: str(v.project), user: v.user === true, yes: v.yes === true, env: str(v.env), ttl });
+        }
+        if (v._positionals[0] === "cursor") {
+          return await installCursorCommand({ project: str(v.project), user: v.user === true, yes: v.yes === true, env: str(v.env), ttl });
+        }
         return await installCommand({
           agent: v._positionals[0],
           project: str(v.project),
@@ -232,6 +246,8 @@ export async function main(argv: string[]): Promise<number> {
           return await uninstallAllCommand({ purge: v.purge === true, yes: v.yes === true, dryRun: v["dry-run"] === true });
         }
         if (v.purge || v.yes || v["dry-run"]) throw new UsageError("--purge/--yes/--dry-run apply to a full `agentgate uninstall` (no integration name)");
+        if (v._positionals[0] === "cursor") return uninstallCursorCommand({ project: str(v.project), user: v.user === true });
+        if (v._positionals[0] === "codex") return uninstallCodexCommand({ project: str(v.project), user: v.user === true });
         return uninstallCommand({ agent: v._positionals[0], project: str(v.project), user: v.user === true });
       }
       case "mcp": {
@@ -275,6 +291,8 @@ export async function main(argv: string[]): Promise<number> {
           const v = parse(rest, {}, true);
           if (v === null) return 2;
           const agent = v._positionals[0];
+          // Cursor: always answers with permission JSON (deny on any failure), exit 0.
+          if (agent === "cursor") return await cursorHookCommand();
           if (agent && agent !== "claude-code") {
             if (!/^[a-z][a-z0-9_-]{0,63}$/.test(agent)) throw new Error(`unsupported hook '${agent}'`);
             return await providerHookCommand(agent);

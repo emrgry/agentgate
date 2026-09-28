@@ -1,0 +1,1 @@
+{ "hook_event_name": "beforeReadFile", "file_path": "/Users/dev/work/demo/.env", "content": "SECRET=1\n", "attachments": [] }

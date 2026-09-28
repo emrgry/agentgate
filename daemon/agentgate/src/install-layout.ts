@@ -83,6 +83,9 @@ export function computeLayout(i: LayoutInputs): Layout {
       protectedDirs: [
         join(repo, "daemon", "agentgate"),
         join(repo, "adapters", "claude-code"),
+        join(repo, "adapters", "cursor"),
+        join(repo, "adapters", "codex"),
+        join(repo, "adapters", "generic"),
         join(repo, "packages"),
         join(repo, "node_modules"),
         join(repo, "apps", "api", ".data"),

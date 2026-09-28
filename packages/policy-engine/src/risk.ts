@@ -12,6 +12,9 @@ const MCP_CONFIG_RES: RegExp[] = [
   /(^|\/)\.claude\.json$/,
 ];
 
+/** Agent hook configs: rewriting them removes the gate itself (Cursor hooks.json). */
+const HOOK_CONFIG_RES: RegExp[] = [/(^|\/)\.cursor\/hooks\.json$/, /\/Application Support\/Cursor\/hooks\.json$/, /^\/etc\/cursor\/hooks\.json$/, /(^|\/)\.codex\/hooks\.json$/];
+
 export const RISK_ORDER: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
 export function maxRisk(a: Risk, b: Risk): Risk {
@@ -116,6 +119,7 @@ export function classifyTargets(targets: string[], ctx: PathContext = {}, verb =
     else if (DEVICE_RE.test(t)) r = { level: "critical", reason: `${verb} raw device ${t}` };
     else if (/^\/dev\/(tcp|udp)\//.test(t)) r = { level: "high", reason: `sends data over the network via ${t}` };
     else if (MCP_CONFIG_RES.some((re) => re.test(t))) r = { level: "critical", reason: `${verb} MCP client config ${t} (reroutes MCP servers)` };
+    else if (HOOK_CONFIG_RES.some((re) => re.test(t))) r = { level: "critical", reason: `${verb} agent hook config ${t} (disables the gate)` };
     else if (isDynamicPath(t)) r = { level: "high", reason: `${verb} a path only known at runtime (${t})` };
     else if (isSensitivePath(t)) r = { level: "high", reason: `${verb} sensitive path ${t}` };
     else if (!isInsideProject(t, ctx)) r = { level: "high", reason: `${verb} ${t} outside the project` };

@@ -1,0 +1,20 @@
+{
+  "name": "@agentgate/adapter-cursor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cursor agent hooks (beforeShellExecution / beforeMCPExecution / beforeReadFile / preToolUse) <-> AgentGate canonical action adapter (pure, no I/O).",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --root ../.. --project adapter-cursor"
+  },
+  "dependencies": {
+    "@agentgate/adapter-claude-code": "*",
+    "@agentgate/adapters": "*",
+    "@agentgate/protocol": "*",
+    "zod": "^3.24.0"
+  }
+}

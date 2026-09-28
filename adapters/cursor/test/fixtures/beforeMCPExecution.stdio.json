@@ -1,0 +1,1 @@
+{ "hook_event_name": "beforeMCPExecution", "tool_name": "delete_repo", "tool_input": "{\"owner\":\"acme\",\"repo\":\"api\"}", "mcp_server_name": "github", "command": "npx -y @modelcontextprotocol/server-github" }

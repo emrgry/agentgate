@@ -1,0 +1,11 @@
+{
+  "conversation_id": "conv-1111",
+  "generation_id": "gen-2222",
+  "model": "claude-opus-4-7-thinking-max",
+  "model_id": "claude-opus-4-7",
+  "model_params": [{ "id": "thinking", "value": "true" }],
+  "cursor_version": "3.1.4",
+  "workspace_roots": ["/Users/dev/work/demo"],
+  "user_email": "dev@example.com",
+  "transcript_path": null
+}

@@ -21,6 +21,8 @@ import { gateExecution } from "../verify.ts";
 import { gateContext } from "../device-keys.ts";
 import { bindExecContext, computeExecContext, gitHooksSetting } from "../exec-context.ts";
 import { layout } from "../install-layout.ts";
+import { isCursorPayload } from "@agentgate/adapter-cursor";
+import { cursorHookCommand } from "./hook-cursor.ts";
 
 /**
  * `agentgate hook claude-code` — Claude Code hook entry (PreToolUse + SessionEnd,
@@ -119,6 +121,12 @@ export async function hookCommand(agent: string | undefined): Promise<number> {
       json = JSON.parse(raw);
     } catch (err) {
       throw new Error(`invalid hook input (${(err as Error).message.split("\n")[0]})`);
+    }
+    // Cursor also runs Claude Code hooks (Settings → Agents → Third-Party Imports, on by
+    // default) with Cursor payloads: hand those to the Cursor gate (docs/cursor.md).
+    if (isCursorPayload(json)) {
+      clearTimeout(deadline);
+      return await cursorHookCommand({ preparsed: json, mode: "claude-import" });
     }
     const env = HookEnvelope.safeParse(json);
     const evName = env.success ? env.data.hook_event_name : "";

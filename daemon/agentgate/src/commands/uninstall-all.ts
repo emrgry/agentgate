@@ -8,11 +8,15 @@ import { layout, type Layout } from "../install-layout.ts";
 import { mcpInstalledFiles, mcpUninstallFile } from "../mcp/install.ts";
 import { c, log, out } from "../output.ts";
 import { claudeInstalls, uninstallCommand, userSettingsPath } from "./install.ts";
+import { cursorInstalls, hasOurCursorHook, uninstallCursorCommand, userCursorHooksPath } from "./install-cursor.ts";
+import { codexInstalls, hasOurCodexHook, uninstallCodexCommand, userCodexHooksPath } from "./install-codex.ts";
 import { isLaunchdPlatform, plistPath, serverDir, uninstallServerCommand } from "./setup.ts";
 
 /**
  * `agentgate uninstall [--purge] [--yes] [--dry-run]` — remove AgentGate from this machine:
  *   1. Claude Code hooks from every settings file `agentgate install` wrote (+ the user file),
+ *      and Cursor hooks from every hooks.json `agentgate install cursor` wrote (+ the user file),
+ *      and Codex hooks + trust entries from every hooks.json `agentgate install codex` wrote (+ the user file),
  *   2. MCP servers wrapped by `agentgate mcp install` (originals restored),
  *   3. the launchd agent (bootout + plist),
  *   4. installed release files: versions/, current, previous, ~/.local/bin/agentgate.
@@ -77,6 +81,36 @@ export function planUninstall(o: UninstallAllOptions, l: Layout = layout()): Ste
   }
   if (!userDone && userSettingsHasOurHooks()) {
     steps.push({ label: `remove Claude Code hooks from ${userSettingsPath()}`, run: () => uninstallCommand({ agent: "claude-code", user: true }) });
+  }
+  let cursorUserDone = false;
+  for (const i of cursorInstalls()) {
+    if (i.scope === "user") {
+      cursorUserDone = true;
+      steps.push({ label: `remove Cursor hooks from ${i.file}`, run: () => uninstallCursorCommand({ user: true }) });
+    } else if (!i.projectDir || !existsSync(i.projectDir)) {
+      steps.push({ label: `skip ${i.file} (project directory no longer exists)`, run: () => undefined });
+    } else {
+      const project = i.projectDir;
+      steps.push({ label: `remove Cursor hooks from ${i.file}`, run: () => uninstallCursorCommand({ project, user: false }) });
+    }
+  }
+  if (!cursorUserDone && hasOurCursorHook(userCursorHooksPath())) {
+    steps.push({ label: `remove Cursor hooks from ${userCursorHooksPath()}`, run: () => uninstallCursorCommand({ user: true }) });
+  }
+  let codexUserDone = false;
+  for (const i of codexInstalls()) {
+    if (i.scope === "user") {
+      codexUserDone = true;
+      steps.push({ label: `remove Codex hooks from ${i.file}`, run: () => uninstallCodexCommand({ user: true }) });
+    } else if (!i.projectDir || !existsSync(i.projectDir)) {
+      steps.push({ label: `skip ${i.file} (project directory no longer exists)`, run: () => undefined });
+    } else {
+      const project = i.projectDir;
+      steps.push({ label: `remove Codex hooks from ${i.file}`, run: () => uninstallCodexCommand({ project, user: false }) });
+    }
+  }
+  if (!codexUserDone && hasOurCodexHook(userCodexHooksPath())) {
+    steps.push({ label: `remove Codex hooks from ${userCodexHooksPath()}`, run: () => uninstallCodexCommand({ user: true }) });
   }
   for (const m of mcpInstalledFiles()) {
     steps.push({ label: `restore MCP server(s) ${m.servers.join(", ") || "(none)"} in ${m.file} (${m.client})`, run: () => mcpUninstallFile(m.client, m.file) });

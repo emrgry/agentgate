@@ -1,0 +1,1 @@
+{ "hook_event_name": "preToolUse", "tool_name": "Delete", "tool_input": { "path": "/Users/dev/work/demo/old.txt" }, "tool_use_id": "tu-2", "cwd": "/Users/dev/work/demo" }

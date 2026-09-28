@@ -12,6 +12,7 @@ export default defineConfig({
       "adapters/claude-code/vitest.config.ts",
       "adapters/codex/vitest.config.ts",
       "adapters/generic/vitest.config.ts",
+      "adapters/cursor/vitest.config.ts",
       {
         // Opt-in (AGENTGATE_RELEASE_E2E=1, macOS): builds + installs real release tarballs.
         test: {

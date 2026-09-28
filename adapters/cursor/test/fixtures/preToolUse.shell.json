@@ -1,0 +1,1 @@
+{ "hook_event_name": "preToolUse", "tool_name": "Shell", "tool_input": { "command": "npm install", "working_directory": "/Users/dev/work/demo" }, "tool_use_id": "tu-3", "cwd": "/Users/dev/work/demo" }

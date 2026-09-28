@@ -1,0 +1,1 @@
+{ "hook_event_name": "preToolUse", "tool_name": "Write", "tool_input": { "file_path": "src/app.ts", "contents": "export {}\n" }, "tool_use_id": "tu-1", "cwd": "/Users/dev/work/demo", "agent_message": "Writing the file" }
