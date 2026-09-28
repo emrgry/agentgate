@@ -86,7 +86,7 @@ describe("H2: execution binding", () => {
     writeFileSync(join(t.work, "s.sh"), "env > envout\n");
     const wrapped = await approve(t, "bash s.sh", { PATH: "/usr/bin:/bin:/usr/sbin" });
     const r = await tool(wrapped, { home: t.home, cwd: t.work, env: { NODE_OPTIONS: "--require /tmp/evil.js", GIT_DIR: "/tmp/evil", DYLD_INSERT_LIBRARIES: "/x", BASH_ENV: "/x", KEEP_ME: "1" } });
-    expect(r.code).toBe(0);
+    expect(r.code, `stderr: ${r.stderr}\nsignal: ${(r as { signal?: unknown }).signal}`).toBe(0);
     const env = readFileSync(join(t.work, "envout"), "utf8");
     expect(env).toMatch(/^PATH=\/usr\/bin:\/bin:\/usr\/sbin$/m);
     for (const k of ["NODE_OPTIONS", "GIT_DIR", "DYLD_INSERT_LIBRARIES", "BASH_ENV"]) expect(env).not.toMatch(new RegExp(`^${k}=`, "m"));
