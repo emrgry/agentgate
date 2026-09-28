@@ -36,6 +36,14 @@ const input = (tool_name: string, tool_input: Record<string, unknown>, cwd: stri
 const hook = (stdin: string, o: { home: string; cwd: string; env?: Record<string, string> }) =>
   runProcess(HOOK_SHIM, [], { home: o.home, cwd: o.cwd, input: stdin, env: { AGENTGATE_NODE: process.execPath, ...o.env } });
 
+const SIP_ENABLED = (() => {
+  try {
+    return /enabled/.test(execFileSync("/usr/bin/csrutil", ["status"], { encoding: "utf8" }));
+  } catch {
+    return false;
+  }
+})();
+
 const decision = (r: RunResult) => JSON.parse(r.stdout).hookSpecificOutput;
 const tool = (cmd: string, o: { home: string; cwd: string; env?: Record<string, string> }) =>
   runProcess("/bin/zsh", ["-c", cmd], { home: o.home, cwd: o.cwd, bareEnv: true, env: { PATH: "/usr/bin:/bin", ...o.env } });
@@ -85,7 +93,10 @@ describe("H2: execution binding", () => {
     const t = await setup();
     writeFileSync(join(t.work, "s.sh"), "env > envout\n");
     const wrapped = await approve(t, "bash s.sh", { PATH: "/usr/bin:/bin:/usr/sbin" });
-    const r = await tool(wrapped, { home: t.home, cwd: t.work, env: { NODE_OPTIONS: "--require /tmp/evil.js", GIT_DIR: "/tmp/evil", DYLD_INSERT_LIBRARIES: "/x", BASH_ENV: "/x", KEEP_ME: "1" } });
+    // DYLD_* only when SIP is on (every real Mac): SIP-protected shells drop it. GitHub's macOS
+    // runners disable SIP, so dyld aborts the shell before anything runs (still fail-closed).
+    const dyld = SIP_ENABLED ? { DYLD_INSERT_LIBRARIES: "/x" } : {};
+    const r = await tool(wrapped, { home: t.home, cwd: t.work, env: { NODE_OPTIONS: "--require /tmp/evil.js", GIT_DIR: "/tmp/evil", ...dyld, BASH_ENV: "/x", KEEP_ME: "1" } });
     expect(r.code, `stderr: ${r.stderr}\nsignal: ${(r as { signal?: unknown }).signal}`).toBe(0);
     const env = readFileSync(join(t.work, "envout"), "utf8");
     expect(env).toMatch(/^PATH=\/usr\/bin:\/bin:\/usr\/sbin$/m);
