@@ -16,7 +16,8 @@ concurrency:
 jobs:
   test:
     name: typecheck + tests
-    runs-on: ubuntu-latest
+    # The CLI targets macOS (launchd, /bin/zsh, Claude Desktop paths): test where it runs.
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
